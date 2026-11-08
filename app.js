@@ -4,7 +4,7 @@
 // ============================================================
 (function () {
   'use strict';
-  const VERSION = '0.5.0';
+  const VERSION = '0.5.2';
   const $ = (s, r = document) => r.querySelector(s);
   const $$ = (s, r = document) => [...r.querySelectorAll(s)];
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -576,13 +576,24 @@
   const fieldHtml = (d, f) =>
     `<label class="field"><span>${f.label}</span>${f.ta ? `<textarea data-field="${f.key}" rows="2">${esc(d[f.key] || '')}</textarea>` : `<input type="text" data-field="${f.key}" value="${esc(d[f.key] || '')}" />`}</label>`;
 
-  function herbRowHtml(h, i) {
-    const methods = Logic.METHODS.map((m) => `<option value="${esc(m)}" ${((h && h.method) || '') === m ? 'selected' : ''}>${m || '煎法'}</option>`).join('');
-    return `<div class="hrow"><span class="no">${i + 1}</span>
+  // 药格：一行 4 味，每味 = 上面药名、下面克数（右边的小字是单位；设了煎法就显示煎法，点它可以改煎法或删除这味药）
+  const unitLabel = (method, doseText) => {
+    const v = String(doseText || '').trim();
+    return method || (v === '' || /^\d+(\.\d+)?$/.test(v) ? 'g' : '');
+  };
+  function herbCellHtml(h) {
+    const m = (h && h.method) || '';
+    const dose = Logic.doseInputText(h);
+    return `<div class="hcell" data-method="${esc(m)}">
       <input class="h-name" list="herbList" value="${esc((h && h.name) || '')}" placeholder="药名" autocomplete="off" autocapitalize="off" spellcheck="false" />
-      <input class="h-dose" value="${esc(Logic.doseInputText(h))}" inputmode="decimal" placeholder="克" autocomplete="off" />
-      <select class="h-method">${methods}</select>
-      <button class="h-del" type="button" data-act="del-herb" aria-label="删除这味药">×</button></div>`;
+      <div class="hd"><input class="h-dose" value="${esc(dose)}" inputmode="decimal" placeholder="克" autocomplete="off" /><button type="button" class="h-unit${m ? ' has' : ''}" data-act="herb-opts" aria-label="煎法或删除这味药">${esc(unitLabel(m, dose))}</button></div></div>`;
+  }
+  const herbCellsHtml = (herbs) => herbs.map(herbCellHtml).join('') + herbCellHtml(null); // 最后永远留一个空位，相当于自动新增
+  function refreshCellUnit(cell) {
+    const m = cell.dataset.method || '';
+    const u = $('.h-unit', cell);
+    u.textContent = unitLabel(m, $('.h-dose', cell).value);
+    u.classList.toggle('has', !!m);
   }
 
   function fillHerbList() {
@@ -637,15 +648,15 @@
         </div>
         <div class="card">
           <h3>中药处方</h3>
-          <label class="field" style="margin-top:0"><span>方名</span><input type="text" data-rx="name" value="${esc(d.rx.name || '')}" placeholder="如：逍遥散加减" /></label>
+          <label class="field" style="margin-top:0"><span>方名</span><input type="text" data-rx="name" value="${esc(d.rx.name || '')}" /></label>
           <div class="linkbar">
             <button type="button" class="lbtn" data-act="copy-prev-rx">带入上次处方</button>
             <button type="button" class="lbtn" data-act="paste-rx">粘贴识别</button>
             <button type="button" class="lbtn" data-act="copy-rx">复制方药</button>
             <button type="button" class="lbtn red" data-act="clear-rx">清空</button>
           </div>
-          <div class="herbs" id="herbs">${herbs.map(herbRowHtml).join('')}</div>
-          <button type="button" class="btn block" data-act="add-herb">＋ 添加一味药</button>
+          <div class="herbs" id="herbs">${herbCellsHtml(herbs)}</div>
+          <p class="hint herb-hint">点药名下面的「g」：设煎法，或删除这味药</p>
           <div class="rx-sum" id="rxSum"></div>
           <div class="warn" id="rxWarn" hidden></div>
           <div class="two">
@@ -661,13 +672,29 @@
       </form>`,
       savebar: `${v ? '<button class="red" data-act="del-v" type="button">删除</button>' : ''}<button class="gray" data-act="discard" type="button" id="btnDiscard" hidden>放弃修改</button><button data-act="save-v" type="button">保存</button>`,
     });
-    if (!herbs.length) addHerbRow();
     autoGrow();
     updateRxInfo();
     const form = $('#vform');
     form.addEventListener('input', (e) => {
-      if (e.target.matches('.h-name,.h-dose,.h-method')) updateRxInfo();
+      if (e.target.matches('.h-name,.h-dose')) {
+        ensureBlankCell(); // 在最后的空位里开始写，就自动再留一个空位
+        refreshCellUnit(e.target.closest('.hcell'));
+        updateRxInfo();
+      }
       markDirty();
+    });
+    // 离开药格区域时，把写空了的格子清掉（最后那个空位除外）
+    form.addEventListener('focusout', (e) => {
+      if (!e.target.matches('.h-name,.h-dose')) return;
+      setTimeout(() => {
+        const box = $('#herbs');
+        if (!box || box.contains(document.activeElement)) return;
+        [...box.children].slice(0, -1).forEach((c) => {
+          if (!$('.h-name', c).value.trim()) c.remove();
+        });
+        ensureBlankCell();
+        updateRxInfo();
+      }, 0);
     });
     form.addEventListener('change', (e) => {
       if (e.target.matches('.h-name')) fillTypicalDose(e.target);
@@ -692,35 +719,34 @@
     });
   }
 
-  function addHerbRow(h) {
+  // 保证药格最后有一个空位（最后一格已经有内容就补一个），返回这个空位
+  function ensureBlankCell() {
     const box = $('#herbs');
-    const n = box.children.length;
-    box.insertAdjacentHTML('beforeend', herbRowHtml(h || { name: '', dose: '', unit: 'g', method: '' }, n));
+    const last = box.lastElementChild;
+    if (!last || $('.h-name', last).value.trim() || $('.h-dose', last).value.trim()) box.insertAdjacentHTML('beforeend', herbCellHtml(null));
     return box.lastElementChild;
-  }
-  function renumber() {
-    $$('#herbs .hrow').forEach((r, i) => ($('.no', r).textContent = i + 1));
   }
 
   function fillTypicalDose(nameEl) {
-    const row = nameEl.closest('.hrow');
-    const dose = $('.h-dose', row);
+    const cell = nameEl.closest('.hcell');
+    const dose = $('.h-dose', cell);
     const name = nameEl.value.trim();
     if (!name || dose.value.trim() || !S.usage) return;
     const u = S.usage.get(name);
     if (u && u.topDose) {
       const h = Logic.parseDose(u.topDose);
       dose.value = Logic.doseInputText(h);
+      refreshCellUnit(cell);
       updateRxInfo();
     }
   }
 
   function collectHerbs() {
-    return $$('#herbs .hrow')
-      .map((r) => {
-        const name = $('.h-name', r).value.trim();
-        const pd = Logic.parseDose($('.h-dose', r).value);
-        return { name, dose: pd.dose, unit: pd.unit, method: $('.h-method', r).value };
+    return $$('#herbs .hcell')
+      .map((c) => {
+        const name = $('.h-name', c).value.trim();
+        const pd = Logic.parseDose($('.h-dose', c).value);
+        return { name, dose: pd.dose, unit: pd.unit, method: c.dataset.method || '' };
       })
       .filter((h) => h.name);
   }
@@ -1016,15 +1042,33 @@
         back('/p/' + encodeURIComponent(pid));
       }
     },
-    'add-herb': () => {
-      const r = addHerbRow();
-      $('.h-name', r).focus();
-      markDirty();
-    },
-    'del-herb': (el) => {
-      el.closest('.hrow').remove();
-      if (!$('#herbs .hrow')) addHerbRow();
-      renumber();
+    // 点药格里的「g」：选煎法，或删除这味药
+    'herb-opts': async (el) => {
+      const cell = el.closest('.hcell');
+      const name = $('.h-name', cell).value.trim();
+      if (!name) return $('.h-name', cell).focus(); // 空位上没什么可设置的，先写药名
+      const cur = cell.dataset.method || '';
+      const body = document.createElement('div');
+      body.innerHTML = `<p class="sheet-sub">煎法</p><div class="chips">${Logic.METHODS.map((m) => `<button type="button" class="lbtn${m === cur ? ' on' : ''}" data-pick="m:${esc(m)}">${m || '无'}</button>`).join('')}</div>
+        <div class="chips" style="margin-top:14px"><button type="button" class="lbtn red" data-pick="del">删除这味药</button></div>`;
+      const v = await sheet({
+        title: name,
+        body,
+        buttons: [{ text: '取消', value: null }],
+        onOpen: (box, done) =>
+          box.addEventListener('click', (e) => {
+            const c = e.target.closest('[data-pick]');
+            if (c) done(c.dataset.pick);
+          }),
+      });
+      if (v == null || !cell.isConnected) return;
+      if (v === 'del') {
+        cell.remove();
+        ensureBlankCell();
+      } else {
+        cell.dataset.method = v.slice(2);
+        refreshCellUnit(cell);
+      }
       updateRxInfo();
       markDirty();
     },
@@ -1097,8 +1141,7 @@
 
   function setHerbs(herbs) {
     const box = $('#herbs');
-    box.innerHTML = herbs.map(herbRowHtml).join('');
-    if (!herbs.length) addHerbRow();
+    box.innerHTML = herbCellsHtml(herbs);
     updateRxInfo();
     markDirty();
   }
@@ -1114,11 +1157,12 @@
     if (e.key !== 'Enter') return;
     if (e.target.matches('.h-name')) {
       e.preventDefault();
-      $('.h-dose', e.target.closest('.hrow')).focus();
+      $('.h-dose', e.target.closest('.hcell')).focus();
     } else if (e.target.matches('.h-dose')) {
       e.preventDefault();
-      const row = e.target.closest('.hrow');
-      const next = row.nextElementSibling || addHerbRow();
+      const cell = e.target.closest('.hcell');
+      ensureBlankCell();
+      const next = cell.nextElementSibling || cell;
       $('.h-name', next).focus();
     }
   });

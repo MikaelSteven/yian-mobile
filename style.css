@@ -438,47 +438,89 @@ main {
   background: var(--red-bg);
   color: var(--red);
 }
+/* 药格：一行 4 味；每味 = 上面药名、下面克数 + 单位（设了煎法就显示煎法） */
 .herbs {
-  margin-top: 6px;
-}
-.hrow {
+  margin-top: 8px;
   display: grid;
-  grid-template-columns: 22px minmax(0, 1fr) 70px 78px 34px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 6px;
-  align-items: center;
-  margin: 6px 0;
 }
-.hrow .no {
-  font-size: 12px;
-  color: var(--muted);
-  text-align: center;
-}
-.hrow input,
-.hrow select {
-  width: 100%;
+.hcell {
   min-width: 0;
-  height: 40px;
-  padding: 0 8px;
   border: 1px solid var(--line-2);
   border-radius: 8px;
   background: #fff;
-  outline: none;
-  font-size: 16px;
+  overflow: hidden;
 }
-.hrow input:focus,
-.hrow select:focus {
+.hcell:focus-within {
   border-color: var(--primary);
 }
-.hrow .h-dose {
+.hcell input {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-size: 16px;
+}
+.hcell .h-name {
+  height: 38px;
+  padding: 0 3px;
+  text-align: center;
+}
+.hcell .hd {
+  display: flex;
+  align-items: center;
+  height: 32px;
+  border-top: 1px solid var(--line);
+  background: #f7f8fa;
+}
+.hcell .h-dose {
+  flex: 1;
+  height: 100%;
+  padding: 0 1px 0 4px;
   text-align: right;
 }
-.hrow .h-del {
-  width: 34px;
-  height: 40px;
+.hcell .h-unit {
+  flex: none;
+  min-width: 26px;
+  height: 100%;
+  padding: 0 5px 0 2px;
   border: none;
   background: none;
   color: var(--muted);
-  font-size: 20px;
+  font-size: 13px;
+  text-align: left;
+}
+.hcell .h-unit.has {
+  color: var(--orange);
+  font-size: 12px;
+  font-weight: 600;
+}
+.herb-hint {
+  margin: 8px 0 0;
+}
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.chips .lbtn {
+  height: 38px;
+  padding: 0 16px;
+  border-radius: 19px;
+  font-size: 16px;
+}
+.lbtn.on {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+}
+.sheet .sheet-sub {
+  margin: 0 0 8px;
+  font-size: 13px;
+  color: var(--muted);
 }
 .rx-sum {
   margin-top: 6px;
