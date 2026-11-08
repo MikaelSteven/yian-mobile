@@ -4,7 +4,7 @@
 // ============================================================
 (function () {
   'use strict';
-  const VERSION = '0.5.2';
+  const VERSION = '0.5.3';
   const $ = (s, r = document) => r.querySelector(s);
   const $$ = (s, r = document) => [...r.querySelectorAll(s)];
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -576,24 +576,26 @@
   const fieldHtml = (d, f) =>
     `<label class="field"><span>${f.label}</span>${f.ta ? `<textarea data-field="${f.key}" rows="2">${esc(d[f.key] || '')}</textarea>` : `<input type="text" data-field="${f.key}" value="${esc(d[f.key] || '')}" />`}</label>`;
 
-  // 药格：一行 4 味，每味 = 上面药名、下面克数（右边的小字是单位；设了煎法就显示煎法，点它可以改煎法或删除这味药）
-  const unitLabel = (method, doseText) => {
+  // 药格：一行 4 味，每味一行：药名 克数 g。设了煎法的，右上角显示小字（先煎/后下…）；点「g」可改煎法或删除这味药
+  const unitLabel = (doseText) => {
     const v = String(doseText || '').trim();
-    return method || (v === '' || /^\d+(\.\d+)?$/.test(v) ? 'g' : '');
+    return v === '' || /^\d+(\.\d+)?$/.test(v) ? 'g' : '';
   };
+  const isLongName = (name) => String(name || '').trim().length >= 4; // 4 字以上的药名、3 位数以上的克数用更小的字，免得被截断
+  const isBigDose = (doseText) => String(doseText || '').trim().length >= 3;
   function herbCellHtml(h) {
     const m = (h && h.method) || '';
     const dose = Logic.doseInputText(h);
-    return `<div class="hcell" data-method="${esc(m)}">
+    return `<div class="hcell${isLongName(h && h.name) ? ' long' : ''}${isBigDose(dose) ? ' bigd' : ''}" data-method="${esc(m)}">
       <input class="h-name" list="herbList" value="${esc((h && h.name) || '')}" placeholder="药名" autocomplete="off" autocapitalize="off" spellcheck="false" />
-      <div class="hd"><input class="h-dose" value="${esc(dose)}" inputmode="decimal" placeholder="克" autocomplete="off" /><button type="button" class="h-unit${m ? ' has' : ''}" data-act="herb-opts" aria-label="煎法或删除这味药">${esc(unitLabel(m, dose))}</button></div></div>`;
+      <input class="h-dose" value="${esc(dose)}" inputmode="decimal" placeholder="克" autocomplete="off" /><button type="button" class="h-unit" data-act="herb-opts" aria-label="煎法或删除这味药">${esc(unitLabel(dose))}</button><span class="h-tag">${esc(m)}</span></div>`;
   }
   const herbCellsHtml = (herbs) => herbs.map(herbCellHtml).join('') + herbCellHtml(null); // 最后永远留一个空位，相当于自动新增
   function refreshCellUnit(cell) {
-    const m = cell.dataset.method || '';
-    const u = $('.h-unit', cell);
-    u.textContent = unitLabel(m, $('.h-dose', cell).value);
-    u.classList.toggle('has', !!m);
+    $('.h-unit', cell).textContent = unitLabel($('.h-dose', cell).value);
+    $('.h-tag', cell).textContent = cell.dataset.method || '';
+    cell.classList.toggle('long', isLongName($('.h-name', cell).value));
+    cell.classList.toggle('bigd', isBigDose($('.h-dose', cell).value));
   }
 
   function fillHerbList() {
@@ -656,7 +658,7 @@
             <button type="button" class="lbtn red" data-act="clear-rx">清空</button>
           </div>
           <div class="herbs" id="herbs">${herbCellsHtml(herbs)}</div>
-          <p class="hint herb-hint">点药名下面的「g」：设煎法，或删除这味药</p>
+          <p class="hint herb-hint">点克数后面的「g」：设煎法，或删除这味药</p>
           <div class="rx-sum" id="rxSum"></div>
           <div class="warn" id="rxWarn" hidden></div>
           <div class="two">

@@ -438,65 +438,79 @@ main {
   background: var(--red-bg);
   color: var(--red);
 }
-/* 药格：一行 4 味；每味 = 上面药名、下面克数 + 单位（设了煎法就显示煎法） */
+/* 药格：一行 4 味，每味一行「药名 克数 g」，尽量省地方。
+   所有尺寸用 em，字号随屏幕宽度在 11~14px 之间变化，保证 3 个字的药名在 4 列里放得下（4 个字以上、3 位数克数自动再小一点） */
 .herbs {
-  margin-top: 8px;
+  margin: 8px -8px 0;
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 6px;
+  gap: 4px;
 }
 .hcell {
+  position: relative;
+  display: flex;
+  align-items: center;
   min-width: 0;
+  height: 36px;
   border: 1px solid var(--line-2);
   border-radius: 8px;
   background: #fff;
   overflow: hidden;
+  font-size: clamp(11px, 3.6vw, 14px);
 }
 .hcell:focus-within {
   border-color: var(--primary);
 }
 .hcell input {
-  display: block;
-  width: 100%;
   min-width: 0;
+  height: 100%;
   border: none;
   outline: none;
   background: transparent;
-  font-size: 16px;
+  font-size: 1em;
 }
 .hcell .h-name {
-  height: 38px;
-  padding: 0 3px;
-  text-align: center;
+  flex: 1 1 auto;
+  padding: 0 0 0 0.3em;
 }
-.hcell .hd {
-  display: flex;
-  align-items: center;
-  height: 32px;
-  border-top: 1px solid var(--line);
-  background: #f7f8fa;
+.hcell .h-name::-webkit-calendar-picker-indicator {
+  display: none !important; /* 药名联想的小箭头，手机上用不到，还占地方 */
+}
+.hcell.long .h-name {
+  font-size: 0.78em;
+  padding-left: 0.4em;
 }
 .hcell .h-dose {
-  flex: 1;
-  height: 100%;
-  padding: 0 1px 0 4px;
+  flex: none;
+  width: 1.8em;
+  padding: 0;
   text-align: right;
+  font-weight: 600;
+}
+.hcell.bigd .h-dose {
+  font-size: 0.8em;
 }
 .hcell .h-unit {
   flex: none;
-  min-width: 26px;
+  width: 0.7em;
   height: 100%;
-  padding: 0 5px 0 2px;
+  padding: 0;
   border: none;
   background: none;
   color: var(--muted);
-  font-size: 13px;
+  font-size: 0.8em;
   text-align: left;
+  overflow: visible;
 }
-.hcell .h-unit.has {
+.hcell .h-tag {
+  position: absolute;
+  top: 1px;
+  right: 3px;
+  font-size: 9px;
+  line-height: 1.1;
   color: var(--orange);
-  font-size: 12px;
   font-weight: 600;
+  pointer-events: none;
 }
 .herb-hint {
   margin: 8px 0 0;
