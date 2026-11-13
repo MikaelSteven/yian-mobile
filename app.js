@@ -4,7 +4,7 @@
 // ============================================================
 (function () {
   'use strict';
-  const VERSION = '0.5.3';
+  const VERSION = '0.6.0';
   const $ = (s, r = document) => r.querySelector(s);
   const $$ = (s, r = document) => [...r.querySelectorAll(s)];
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -12,6 +12,8 @@
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
   const ICON = {
+    list: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/></svg>',
+    needle: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20L16 8"/><path d="M15 5l4 4"/><path d="M17 3l4 4"/><circle cx="4.5" cy="19.5" r="1"/></svg>',
     back: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg>',
     sync: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 0 0-14.5-4.5L4 8"/><path d="M4 4v4h4"/><path d="M4 13a8 8 0 0 0 14.5 4.5L20 16"/><path d="M20 20v-4h-4"/></svg>',
     gear: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>',
@@ -99,7 +101,7 @@
   const cfgSet = (c) => (c ? localStorage.setItem('yian.cfg', JSON.stringify(c)) : localStorage.removeItem('yian.cfg'));
 
   // ---------------- 状态 ----------------
-  const blankDb = () => ({ patients: [], visits: [], templates: [], settings: {}, meta: {} });
+  const blankDb = () => ({ patients: [], visits: [], templates: [], acu: [], settings: {}, meta: {} });
   const S = {
     db: blankDb(),
     base: null,
@@ -114,6 +116,8 @@
     depth: 0,
     sync: { state: 'idle', lastAt: null, summary: '', error: '', running: false, again: false, timer: null, asked: false },
   };
+
+  let Acu_ui = null; // 针灸部分（acu-ui.js），在下面「事件」那里创建
 
   // ---------------- 小工具 ----------------
   let toastTimer;
@@ -232,10 +236,19 @@
     if (st) st.innerHTML = syncStateHtml();
   }
 
-  function page({ barHtml, html, fab = '', savebar = '' }) {
+  // tabs：'list' / 'acu' 时显示底部的「病历 | 针灸」切换
+  function tabsHtml(cur) {
+    const n = Acu_ui ? Acu_ui.activeCount() : 0;
+    return `<nav class="tabs"><button data-act="tab-list" data-tab="list" class="${cur === 'list' ? 'on' : ''}">${ICON.list}<span>病历</span></button><button data-act="tab-acu" data-tab="acu" class="${cur === 'acu' ? 'on' : ''}">${ICON.needle}<span>针灸</span><i class="badge" ${n ? '' : 'hidden'}>${n || ''}</i></button></nav>`;
+  }
+  function page({ barHtml, html, fab = '', savebar = '', tabs = '' }) {
     $('#bar').innerHTML = barHtml;
     $('#view').innerHTML = html;
     $('#fab').innerHTML = fab;
+    const oldTabs = $('.tabs');
+    if (oldTabs) oldTabs.remove();
+    document.body.classList.toggle('has-tabs', !!tabs);
+    if (tabs) document.body.insertAdjacentHTML('beforeend', tabsHtml(tabs));
     const old = $('.savebar');
     if (old) old.remove();
     if (savebar) {
@@ -276,8 +289,8 @@
   async function render(opts = {}) {
     const seq = ++renderSeq;
     // 离开正在编辑的医案/档案：有修改就先自动保存，不会丢
-    if (!opts.keep && (S.view === 'visit' || S.view === 'pedit') && S.dirty) {
-      const ok = S.view === 'visit' ? await saveVisit({ auto: true }) : await savePatient({ auto: true });
+    if (!opts.keep && (S.view === 'visit' || S.view === 'pedit' || S.view === 'acuedit') && S.dirty) {
+      const ok = S.view === 'visit' ? await saveVisit({ auto: true }) : S.view === 'acuedit' ? await Acu_ui.saveForm({ auto: true }) : await savePatient({ auto: true });
       if (!ok) {
         // 保存不了（比如没写日期）：留在原页面
         history.pushState({ d: S.depth + 1 }, '', S.formHash || '#/');
@@ -299,11 +312,14 @@
     else if (r.name === 'pe' && getPatient(r.a)) viewPatientEdit(r.a);
     else if (r.name === 'np') viewPatientEdit(null);
     else if (r.name === 'set') viewSettings();
-    else {
+    else if (Acu_ui && Acu_ui.route(r)) {
+      /* 针灸的页面 */
+    } else {
       if (r.name !== 'list' && history.state) history.replaceState({ d: S.depth }, '', '#/');
       viewList();
     }
     window.scrollTo(0, scroll);
+    if (S.view === 'settings' && Acu_ui) Acu_ui.fillPerm();
   }
 
   // ---------------- 首次设置 ----------------
@@ -416,6 +432,7 @@
         <div class="filters"><button class="fchip ${S.filter === 'all' ? 'on' : ''}" data-act="filter" data-f="all">全部</button><button class="fchip ${S.filter === 'due' ? 'on' : ''}" data-act="filter" data-f="due">待复诊</button></div></div>
         <div id="plist">${listItemsHtml()}</div>`,
       fab: `<button class="fab" data-act="new-p">${ICON.plus}新建患者</button>`,
+      tabs: 'list',
     });
     $('#q').addEventListener('input', (e) => {
       S.q = e.target.value;
@@ -458,7 +475,8 @@
                 )
                 .join('')}</div>`
             : '<div class="empty">还没有医案</div>'
-        }`,
+        }
+        ${Acu_ui ? Acu_ui.patientSectionHtml(id) : ''}<div style="height:70px"></div>`,
       fab: `<button class="fab" data-act="new-v" data-id="${esc(id)}">${ICON.plus}新建医案</button>`,
     });
   }
@@ -842,6 +860,7 @@
           <div class="kv"><b>医案</b><span>${nV} 条</span></div>
           <p class="hint">手机版只同步文字，不含照片；照片请在电脑上查看。</p>
         </div>
+        ${Acu_ui ? Acu_ui.settingsCardHtml() : ''}
         <div class="card"><h3>其他</h3>
           <button class="btn block" data-act="install-help">添加到手机桌面</button>
           <button class="btn danger block" data-act="logout">退出并清除这部手机上的数据</button>
@@ -867,6 +886,7 @@
     const ids = new Set(db.patients.filter((p) => p.sample).map((p) => p.id));
     db.patients = db.patients.filter((p) => !p.sample);
     db.visits = db.visits.filter((v) => !v.sample && !ids.has(v.patientId));
+    db.acu = (db.acu || []).filter((a) => !a.sample && !ids.has(a.patientId));
     return db;
   }
 
@@ -949,13 +969,25 @@
   // 拉到了新数据：刷新当前页面（正在编辑时不动编辑内容）
   function afterPulled() {
     fillHerbList();
+    if (Acu_ui) {
+      Acu_ui.reconcile();
+      Acu_ui.refresh();
+    }
     if (S.view === 'list') {
       const l = $('#plist');
       if (l) l.innerHTML = listItemsHtml();
       const t = $('#bar .ttl small');
       if (t) t.textContent = `${patientsActive().length} 位患者`;
-    } else if (S.view === 'patient' || S.view === 'settings') {
+    } else if (S.view === 'patient' || S.view === 'settings' || S.view === 'acuall') {
       render({ keep: true });
+    } else if (S.view === 'acu') {
+      Acu_ui.refresh();
+    } else if ((S.view === 'acuedit' || S.view === 'acunew') && !S.dirty) {
+      const r = parseRoute();
+      if (r.a === 'e' && !(S.db.acu || []).some((a) => a.id === r.b && !a.deletedAt)) {
+        toast('这条记录已在别处被删除', 'warn');
+        back('/acu');
+      }
     } else if ((S.view === 'visit' || S.view === 'pedit') && !S.dirty) {
       const r = parseRoute();
       if ((r.name === 'v' && !getVisit(r.a)) || (r.name === 'pe' && !getPatient(r.a))) {
@@ -1003,6 +1035,12 @@
           if (v.patientId === p.id && !v.deletedAt) {
             v.deletedAt = now;
             v.updatedAt = now;
+          }
+        });
+        (db.acu || []).forEach((a) => {
+          if (a.patientId === p.id && !a.deletedAt) {
+            a.deletedAt = now;
+            a.updatedAt = now;
           }
         });
       });
@@ -1148,6 +1186,22 @@
     markDirty();
   }
 
+  // 针灸部分
+  if (window.AcuUIFactory) {
+    Acu_ui = window.AcuUIFactory({ S, $, $$, esc, sheet, confirmSheet, alertSheet, toast, commit, page, bar, backBtn, chipHtml, go, back, render, getPatient, patientsActive, hhmm, ICON, Logic });
+    Object.assign(acts, Acu_ui.acts);
+  }
+  acts['tab-list'] = () => {
+    try {
+      localStorage.setItem('yian.tab', 'list');
+    } catch (e) {
+      /* 忽略 */
+    }
+    history.replaceState({ d: 0 }, '', '#/');
+    S.depth = 0;
+    render();
+  };
+
   document.addEventListener('click', (e) => {
     const el = e.target.closest('[data-act]');
     if (!el || !acts[el.dataset.act]) return;
@@ -1182,6 +1236,7 @@
       if (db && Array.isArray(db.patients) && Array.isArray(db.visits)) {
         S.db = db;
         if (!Array.isArray(S.db.templates)) S.db.templates = [];
+        if (!Array.isArray(S.db.acu)) S.db.acu = [];
         if (!S.db.settings) S.db.settings = {};
       }
       S.base = (await KV.get('base')) || null;
@@ -1194,17 +1249,25 @@
     } catch (e) {
       /* 读不到就当是新的 */
     }
-    history.replaceState({ d: 0 }, '', location.hash || '#/');
+    let startHash = location.hash;
+    try {
+      if (!startHash && localStorage.getItem('yian.tab') === 'acu') startHash = '#/acu';
+    } catch (e) {
+      /* 忽略 */
+    }
+    history.replaceState({ d: 0 }, '', startHash || '#/');
     await render();
+    if (Acu_ui) Acu_ui.reconcile();
     if (S.cfg) setTimeout(() => syncNow({ quiet: true }), 600);
     setInterval(() => {
       if (S.cfg && document.visibilityState === 'visible' && !S.dirty) syncNow({ quiet: true });
     }, 3 * 60 * 1000);
-    if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {
+    const inApp = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
+    if (!inApp && 'serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {
       navigator.serviceWorker.register('sw.js').catch(() => {});
     }
   }
 
-  window.__m = { S, syncNow, go, render };
+  window.__m = { S, syncNow, go, render, acu: () => Acu_ui };
   init();
 })();

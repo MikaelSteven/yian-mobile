@@ -146,8 +146,8 @@
   }
 
   // ---------- 本机数据 → 同步条目 ----------
-  // 键：p:患者id  v:医案id  t:协定方id  s:设置  h:自定义药名库
-  // 示例数据不同步
+  // 键：p:患者id  v:医案id  t:协定方id  a:扎针记录id  s:设置  h:自定义药名库
+  // 示例数据不同步。本版本还不认识的键（以后新版本加的）原样保存在 syncExtra 里，不会被当成「删除了」
   function collect(db) {
     const out = {};
     const sampleP = new Set();
@@ -157,6 +157,9 @@
     }
     for (const v of db.visits || []) if (!v.sample && !sampleP.has(v.patientId)) out['v:' + v.id] = v;
     for (const t of db.templates || []) if (!t.sample) out['t:' + t.id] = t;
+    for (const a of db.acu || []) if (!a.sample && !sampleP.has(a.patientId)) out['a:' + a.id] = a;
+    const ex = db.syncExtra && typeof db.syncExtra === 'object' ? db.syncExtra : {};
+    for (const k of Object.keys(ex)) if (!(k in out) && ex[k] != null) out[k] = ex[k];
     if (db.settings && typeof db.settings === 'object' && Object.keys(db.settings).length) out.s = db.settings;
     if (typeof db.herbLibText === 'string') out.h = { text: db.herbLibText };
     return out;
@@ -227,9 +230,9 @@
 
   // 把合并结果应用到本机数据，返回新的数据对象（不修改传入的）和统计
   function applyMerged(db, merged, local) {
-    const nd = Object.assign({}, db, { patients: [...db.patients], visits: [...db.visits], templates: [...(db.templates || [])] });
+    const nd = Object.assign({}, db, { patients: [...db.patients], visits: [...db.visits], templates: [...(db.templates || [])], acu: [...(db.acu || [])] });
     const stats = { updated: 0, added: 0, removed: 0 };
-    const arrOf = { p: 'patients', v: 'visits', t: 'templates' };
+    const arrOf = { p: 'patients', v: 'visits', t: 'templates', a: 'acu' };
     for (const key of Object.keys(merged)) {
       const m = merged[key];
       const l = local[key];
@@ -243,6 +246,14 @@
       }
       if (key === 'h') {
         nd.herbLibText = m.d ? m.d.text : null;
+        stats.updated++;
+        continue;
+      }
+      if (!(key[1] === ':' && arrOf[key[0]])) {
+        // 不认识的键：原样保留，下次同步再带上去
+        nd.syncExtra = Object.assign({}, nd.syncExtra);
+        if (m.d === null) delete nd.syncExtra[key];
+        else nd.syncExtra[key] = clone(m.d);
         stats.updated++;
         continue;
       }
@@ -406,7 +417,7 @@
   }
 
   function countReal(db) {
-    return (db.patients || []).filter((p) => !p.sample).length + (db.visits || []).filter((v) => !v.sample).length;
+    return (db.patients || []).filter((p) => !p.sample).length + (db.visits || []).filter((v) => !v.sample).length + (db.acu || []).filter((a) => !a.sample).length;
   }
 
   // 做一次同步。不会修改传入的数据；结果里的 db 是合并后的新数据（本机没变化时为 null），
@@ -470,6 +481,7 @@
       empty: false,
       patients: Object.keys(e).filter((k) => k[0] === 'p' && e[k].d && !e[k].d.deletedAt).length,
       visits: Object.keys(e).filter((k) => k[0] === 'v' && e[k].d && !e[k].d.deletedAt).length,
+      acu: Object.keys(e).filter((k) => k[0] === 'a' && k[1] === ':' && e[k].d && !e[k].d.deletedAt).length,
       savedAt: o.state.savedAt || null,
     };
   }

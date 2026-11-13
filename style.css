@@ -805,3 +805,440 @@ main {
     transform: rotate(360deg);
   }
 }
+
+/* ============================================================
+   针灸
+   ============================================================ */
+/* 底部「病历 | 针灸」切换 */
+.tabs {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 14;
+  display: flex;
+  padding-bottom: var(--safe-b);
+  background: #fff;
+  border-top: 1px solid var(--line);
+}
+.tabs button {
+  position: relative;
+  flex: 1;
+  height: 54px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-size: 12px;
+}
+.tabs button svg {
+  width: 22px;
+  height: 22px;
+}
+.tabs button.on {
+  color: var(--primary);
+  font-weight: 600;
+}
+.tabs .badge {
+  position: absolute;
+  top: 5px;
+  left: calc(50% + 8px);
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--red);
+  color: #fff;
+  font-size: 11px;
+  font-style: normal;
+  line-height: 18px;
+}
+body.has-tabs #view {
+  padding-bottom: calc(70px + var(--safe-b));
+}
+body.has-tabs #fab {
+  bottom: calc(70px + var(--safe-b));
+}
+
+/* 床位：右上 1、右下 2、左上 3、左下 4 */
+.beds {
+  display: grid;
+  grid-template-rows: auto auto;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.bedcell {
+  min-width: 0;
+}
+.bed {
+  position: relative;
+  width: 100%;
+  min-height: 168px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  padding: 10px 10px 8px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: #fff;
+  text-align: left;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+.bed .bn {
+  font-size: 13px;
+  color: var(--muted);
+  font-weight: 600;
+}
+.bed.empty {
+  align-items: center;
+  justify-content: center;
+  border: 1.5px dashed var(--line-2);
+  background: transparent;
+  box-shadow: none;
+  color: var(--muted);
+}
+.bed.empty .bn {
+  position: absolute;
+  top: 8px;
+  left: 10px;
+}
+.bed.empty .plus {
+  font-size: 34px;
+  line-height: 1;
+  color: var(--primary);
+}
+.bed.empty .em {
+  font-size: 13px;
+}
+.bed.on {
+  border-color: var(--primary-line);
+  background: linear-gradient(#fff, #f6faff);
+}
+.bed.due {
+  border-color: var(--red);
+  background: linear-gradient(#fff, #fff1f1);
+  animation: duePulse 1.6s ease-in-out infinite;
+}
+@keyframes duePulse {
+  50% {
+    box-shadow: 0 0 0 4px rgba(229, 72, 77, 0.18);
+  }
+}
+.bed .who {
+  max-width: 100%;
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bed .tm {
+  font-size: 13px;
+  color: var(--text-2);
+}
+.bed .tm b {
+  font-size: 20px;
+  color: var(--text);
+}
+.bed .pg {
+  width: 100%;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--line);
+  overflow: hidden;
+}
+.bed .pg i {
+  display: block;
+  height: 100%;
+  background: var(--primary);
+}
+.bed.due .pg i {
+  background: var(--red);
+}
+.bed .nx {
+  font-size: 12.5px;
+  color: var(--text-2);
+  line-height: 1.3;
+}
+.red {
+  color: var(--red);
+}
+.bed .dots {
+  display: flex;
+  gap: 4px;
+}
+.bed .dots i {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  border: 1.5px solid var(--line-2);
+}
+.bed .dots i.on {
+  background: var(--green);
+  border-color: var(--green);
+}
+.bed .dots i.miss {
+  border-color: var(--orange);
+}
+.bed .acts {
+  display: flex;
+  gap: 6px;
+  width: 100%;
+  margin-top: auto;
+}
+.bed .mini {
+  flex: 1;
+  height: 34px;
+  border: 1px solid var(--primary-line);
+  border-radius: 8px;
+  background: var(--primary-soft);
+  color: var(--primary);
+  font-size: 14px;
+  font-weight: 600;
+}
+.bed .mini.red {
+  border-color: #f0b4b6;
+  background: var(--red-bg);
+  color: var(--red);
+}
+.acu-tools {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+.acu-tools .btn {
+  flex: 1;
+  font-size: 15px;
+  padding: 0 8px;
+}
+
+/* 选患者 */
+#pq {
+  width: 100%;
+  height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--line-2);
+  border-radius: 10px;
+  font-size: 16px;
+}
+.plist {
+  margin-top: 6px;
+}
+.prow,
+.picked {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 2px;
+  border: none;
+  border-bottom: 1px solid var(--line);
+  background: none;
+  text-align: left;
+}
+.picked {
+  border: none;
+}
+.prow .avatar,
+.picked .avatar {
+  width: 36px;
+  height: 36px;
+  font-size: 15px;
+}
+.prow small,
+.picked small {
+  color: var(--muted);
+  font-size: 13px;
+}
+.picked .lbtn {
+  margin-left: auto;
+}
+.prow.new b {
+  color: var(--primary);
+}
+.card h3 small {
+  font-weight: 400;
+  color: var(--muted);
+  font-size: 13px;
+  margin-left: 6px;
+}
+.card > h3.hflex {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.card h3 .right,
+.count .right {
+  margin-left: auto;
+  height: 28px;
+  font-weight: 400;
+  font-size: 13px;
+}
+.bedtag {
+  margin-left: 8px;
+  padding: 1px 8px;
+  border-radius: 10px;
+  background: var(--primary-soft);
+  color: var(--primary);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* 穴位小方块 */
+.pts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px;
+  min-height: 48px;
+  border: 1px solid var(--line-2);
+  border-radius: 10px;
+}
+.pts:focus-within {
+  border-color: var(--primary);
+}
+.pts .pt {
+  height: 32px;
+  padding: 0 10px;
+  border: none;
+  border-radius: 8px;
+  background: var(--primary);
+  color: #fff;
+  font-size: 15px;
+}
+.pts .pt.unk {
+  background: var(--orange);
+}
+.pts input {
+  flex: 1;
+  min-width: 120px;
+  height: 32px;
+  border: none;
+  outline: none;
+  font-size: 16px;
+}
+.sugg {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.sugg .sg {
+  height: 32px;
+  padding: 0 11px;
+  border: 1px solid var(--line-2);
+  border-radius: 16px;
+  background: #fff;
+  font-size: 15px;
+}
+.sugg .sg.raw {
+  border-style: dashed;
+  color: var(--text-2);
+}
+#aSym:focus,
+#aFeel:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+#aSym,
+#aFeel {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--line-2);
+  border-radius: 10px;
+  font-size: 16px;
+  resize: vertical;
+}
+
+/* 拔针核对 */
+.rmv {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+.rmv .rp {
+  position: relative;
+  min-height: 52px;
+  padding: 4px;
+  border: 2px solid var(--line-2);
+  border-radius: 10px;
+  background: #fff;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+.rmv .rp small {
+  display: block;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--muted);
+}
+.rmv .rp.ok {
+  border-color: var(--green);
+  background: var(--green-bg);
+  color: var(--green);
+  text-decoration: line-through;
+}
+.rmv .rp.ok::after {
+  content: '✓';
+  position: absolute;
+  top: 2px;
+  right: 6px;
+  text-decoration: none;
+}
+.rmv-c {
+  text-align: center;
+  font-weight: 600;
+}
+.sheet .btn:disabled {
+  opacity: 0.55;
+}
+
+/* 设置里的加减 */
+.stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+.stepper .lbtn {
+  width: 36px;
+  padding: 0;
+  font-size: 18px;
+}
+
+/* 文字导入 */
+.imp.off {
+  opacity: 0.5;
+}
+.impchk {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 0 4px;
+  font-weight: 600;
+}
+.impchk input {
+  width: 20px;
+  height: 20px;
+}
+.newp {
+  font-style: normal;
+  color: var(--orange);
+  font-size: 12px;
+}
+.imp details {
+  margin: 4px 0 6px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.imp pre {
+  white-space: pre-wrap;
+  margin: 4px 0 0;
+  font: inherit;
+}
