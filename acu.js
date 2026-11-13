@@ -248,11 +248,24 @@
   //  A. 一位患者一段：「洪芸，女，47：失眠，腰突。10.31委中刺血，太冲，…。11.12加右仙骨」
   //     段里按日期分成多次；「一样」＝和上次一样；「加…」＝上次的基础上再加；其余的话当作感觉、备注
   //  B. 一次一行：「11月8日 张三 失眠 百会 四神聪 针后睡意明显」
-  const ALIAS2 = Object.assign({ 三里: '足三里' }, ALIAS);
-  // 书上没有、但常写的穴位 / 部位（导入时当作穴位）。用过的自定义穴位也会自动加进来
-  const SEED_CUSTOM = ['仙骨', '足三重', '侧头', '火土', '间谷', '肩颈', '疏肝', '咽痛点', '四指尖', '灵骨', '大白', '肩中', '中白', '下白', '腕顺', '重子', '重仙', '叉三', '门金', '木穴', '正筋', '正宗', '三重', '驷马'];
-  const MODS = ['温针灸', '温针', '刺血', '放血', '点刺', '艾灸', '灸', '电针', '火针', '拔罐'];
-  const REMARK = /[了好疼痛不没觉得想胀麻热酸重轻样些晕吐醒肚说很太又还再才就也都能会要过时后前天次分钟小半但反胃病症咳嗽睡眠梦便尿汗饿渴累困拔扎往事啊吧呢吗的]/;
+  const ALIAS2 = Object.assign({ 三里: '足三里', 大棱: '大陵', 仙骨穴: '仙骨' }, ALIAS);
+  // 书上没有、但常写的穴位 / 部位 / 董氏奇穴（导入时当作穴位）。用过的自定义穴位也会自动加进来
+  const SEED_CUSTOM = [
+    '仙骨', '足三重', '侧头', '火土', '间谷', '间骨', '疏肝', '咽痛点', '四指尖', '灵骨', '大白', '中白', '下白', '腕顺', '重子', '重仙', '叉三', '三叉一', '三叉二', '三叉三',
+    '门金', '木穴', '正筋', '正宗', '三重', '驷马', '制污', '妇科', '还巢', '龙眼', '暖宫', '护宫', '子门', '子户', '中指', '小指', '中指小指', '耳尖', '肘窝',
+    '八髎', '肩', '颈', '背', '脖子', '肩颈', '肩膀', '肩周', '颈背', '颈肩', '颈肩臂', '肩颈背', '脖子头', '脖子肩', '后脑勺', '屁股', '三角肌', '胳膊', '压痛点',
+    '血海上压痛点', '血海上面压痛点', '合谷下面',
+  ];
+  // 刺法、用法（写在穴位后面）
+  const MODS = ['温针灸', '温针', '刺血', '放血', '点刺', '艾灸', '加灸', '灸', '电针', '火针', '拔罐', '浅扎', '深扎', '降压', '强腰', '消肿', '疏肝利胆', '利胆', '止痒'];
+  const MOD_NORM = { 温针灸: '温针', 放血: '刺血', 艾灸: '灸', 加灸: '灸' };
+  // 写在穴位前面的用途 / 说明（「止痒血海」「噩梦商丘」）
+  const PRE_NOTE = /^(止痒|痛经|噩梦|害怕|不怕冷|腿肿加|腿肿|前列腺加|前列腺|月经不尽灸|月经不尽|先|再|只扎了|只扎|只|扎了|扎|又扎|还扎|灸)/;
+  // 穴位后面跟的这些字，说明是在讲感觉，不是穴位备注
+  const FEEL_CH = /[没不了好感觉痛疼胀舒服轻松凉气动出冒热暖酸麻瘤病炎症结节肿脱垂药难受晕后息增生囊术]/;
+  // 身体部位（「脖子好些」是在说效果，不是扎了脖子）
+  const AREAS = new Set(['肩', '颈', '背', '脖子', '肩颈', '肩膀', '肩周', '颈背', '颈肩', '颈肩臂', '肩颈背', '脖子头', '脖子肩', '后脑勺', '屁股', '三角肌', '胳膊', '腰', '头']);
+  const EVAL_TAIL = /^(没感觉|没啥感觉|没效果?|不明显|好些|好多了|好一点|好了|舒服了|舒服|轻松了|轻松|不胀痛了|不疼了|不痛了|没那么.+)$/;
   const DATE_ANY = /(?:(20\d{2})\s*[年.\-\/]\s*)?(?<!\d)(\d{1,2})\s*(?:[月.\-\/])\s*(\d{1,2})(?!\d)\s*[日号]?/g;
 
   function makeDict(custom, groups) {
@@ -260,16 +273,26 @@
     return [...names].filter(Boolean).sort((a, b) => b.length - a.length);
   }
   const canon = (n) => ALIAS2[n] || n;
+  const normMod = (m) => MOD_NORM[m] || m;
+
+  // 把「双手 / 左手 / 两只手」这种写法统一成「双 / 左 / 右」
+  function normText(t) {
+    return String(t || '')
+      .replace(/两只手|双手手|双手|两手/g, '双')
+      .replace(/([左右])手手?(?!三里|五里)/g, '$1')
+      .replace(/两(?=[一-龥]{1,4}透)/g, '双')
+      .replace(/两(?=仙骨|液门|三叉)/g, '双');
+  }
 
   // 把一小段（逗号之间）认成穴位；认不出返回 null
-  // 「天枢气海足三里」「老十针加阳陵泉」「右液门透中渚」「委中刺血」「关元温针」「丰隆穴」「肾俞双侧」
+  // 「天枢气海足三里」「老十针加阳陵泉」「右液门透中渚」「委中刺血」「关元温针」「丰隆穴」「肾俞双侧」「门金（陷谷）」
   function tokenizePoints(seg, dict) {
-    let s = seg.replace(/穴(?=$|[双左右透刺温灸])/g, '');
+    const s = String(seg).replace(/穴(?=$|[双左右透刺温灸（(，、])/g, '');
     const out = [];
     let i = 0;
     while (i < s.length) {
       const rest = s.slice(i);
-      const conn = /^(加了|加上|加|和|及|还有|配)/.exec(rest);
+      const conn = /^(加了|加上|加|和|及|还有|配|、)/.exec(rest);
       if (conn && out.length) {
         i += conn[0].length;
         continue;
@@ -283,12 +306,16 @@
       const r2 = s.slice(i);
       const name = dict.find((n) => r2.startsWith(n));
       if (!name) {
-        // 前一个穴位后面跟着刺法：「咽痛点刺血」的「刺血」已在下面处理；这里是认不出的字
+        // 穴位后面跟着的几个字的说明（「中脘胃寒」）：算作这个穴位的备注
+        if (out.length && !side && r2.length <= 4 && /^[一-龥]+$/.test(r2) && !FEEL_CH.test(r2) && !AREAS.has(out[out.length - 1].name)) {
+          const last = out[out.length - 1];
+          last.note = [last.note, r2].filter(Boolean).join('，');
+          return out;
+        }
         return null;
       }
       i += name.length;
       let label = canon(name);
-      // 透刺：「液门透中渚」
       const tm = /^透/.exec(s.slice(i));
       if (tm) {
         const r3 = s.slice(i + 1);
@@ -298,84 +325,189 @@
           i += 1 + n2.length;
         }
       }
-      // 后面的「（双）」「双侧」
-      const pm = /^(?:[（(](双|左|右)[)）]|(双侧|两侧))/.exec(s.slice(i));
-      if (pm) {
-        side = (pm[1] || pm[2]).replace(/侧$/, '').replace('两', '双');
-        i += pm[0].length;
+      const t = { name: label, side, mod: '', note: '' };
+      // 后面的「（双）」「双侧」「（陷谷）」「（右很疼）」、刺法，可以有好几个
+      for (;;) {
+        const r4 = s.slice(i);
+        const pm = /^(?:[（(](双|左|右)(?:侧)?[)）]|(双侧|两侧))/.exec(r4);
+        if (pm) {
+          t.side = (pm[1] || pm[2]).replace(/侧$/, '').replace('两', '双');
+          i += pm[0].length;
+          continue;
+        }
+        const md = MODS.find((m) => r4.startsWith(m));
+        if (md) {
+          t.mod = [t.mod, normMod(md)].filter(Boolean).join('，');
+          i += md.length;
+          continue;
+        }
+        const nm = /^[（(]([^)）]*)[)）]/.exec(r4);
+        if (nm) {
+          t.note = [t.note, nm[1]].filter(Boolean).join('，');
+          i += nm[0].length;
+          continue;
+        }
+        break;
       }
-      // 刺法：温针、刺血、灸…
-      let mod = '';
-      const r4 = s.slice(i);
-      const md = MODS.find((m) => r4.startsWith(m));
-      if (md) {
-        mod = md === '温针灸' ? '温针' : md === '放血' ? '刺血' : md;
-        i += md.length;
-      }
-      out.push({ name: label, side, mod });
+      out.push(t);
     }
+    // 「肝俞八髎刺血」「少商和商阳刺血」：刺血写在最后，前面的也是
+    const lastMod = out.length > 1 && out[out.length - 1].mod;
+    if (lastMod === '刺血' && out.slice(0, -1).every((x) => !x.mod)) out.forEach((x) => (x.mod = '刺血'));
     return out.length ? out : null;
   }
   function labelOf(t) {
     let l = t.name;
-    if (t.side) l = t.side === '双' ? `${l}（双）` : t.side + l;
-    if (t.mod) l = `${l}（${t.mod}）`.replace('）（', '，');
-    return l;
+    const tags = [];
+    if (t.side === '双') tags.push('双');
+    else if (t.side) l = t.side + l;
+    if (t.mod) tags.push(t.mod);
+    if (t.note) tags.push(t.note.replace(/\u2063/g, '、'));
+    return tags.length ? `${l}（${tags.join('，')}）` : l;
   }
 
-  // 一段文字（一次就诊）→ { points（写出来的穴位）, same（写了「一样」或「加…」）, pre（穴位前的话）, post（穴位后的话） }
+  // 一段文字（一次就诊）→ 写出来的穴位和各种说法
+  //   points：这次写出来的穴位；same：「一样 / 加… / 其他一样」（在上次的基础上）；first：「按第一次来」
+  //   remove：「不要… / 去…」；noBlood：「不刺血」；noMoxa：「没灸 / 关元不灸」（true 或穴位名）；moxaTo：「灸换到中脘」
+  //   only：「只扎了…」；pre / post：穴位前 / 后的话；feel：「针后…」
   function parseSession(text, dict, groups) {
-    const segs = [];
-    for (const big of String(text || '').split(/[，,。；;：:\n\s]+/)) {
-      const parts = big
+    const res = { added: [], points: [], same: false, first: false, only: false, remove: [], noBlood: false, noMoxa: [], moxaTo: '', pre: [], post: [], feel: [] };
+    const addTok = (toks, pre, isAdd) => {
+      if (isAdd) toks.forEach((t) => res.added.push(t.name));
+      toks.forEach((t, k) => {
+        if (k === 0 && pre) {
+          if (/灸$/.test(pre)) t.mod = [t.mod, '灸'].filter(Boolean).join('，');
+          const note = pre.replace(/^(先|再|只扎了|只扎|只|扎|又扎|还扎)$/, '').replace(/(加|灸)$/, '');
+          if (note && note.length >= 3) res.pre.push(note); // 「月经不尽灸隐白」：前面那几个字是病症
+          else if (note && !/^(先|再|只|扎)/.test(pre)) t.note = [note, t.note].filter(Boolean).join('，');
+        }
+        if (groups[t.name] && !t.side && !t.mod && !t.note) for (const x of groups[t.name]) addPoint(res.points, x);
+        else addPoint(res.points, labelOf(t));
+      });
+    };
+    const remark = (seg) => (res.points.length || res.same ? res.post : res.pre).push(seg);
+    // 括号里的逗号不算分隔
+    const clean = normText(text).replace(/[（(][^)）]*[)）]/g, (m) => m.replace(/[，,、]/g, '\u2063'));
+    for (const big of clean.split(/[，,。；;：:\n\s]+/).filter(Boolean)) {
+      const subs = big
         .split('、')
         .map((x) => x.trim())
         .filter(Boolean);
+      let mode = ''; // remove：这一串都是去掉的
       // 「少商、商阳、咽痛点刺血」：刺血写在最后，前面几个也是刺血
-      const lm = parts.length > 1 && /(刺血|放血|点刺)$/.exec(parts[parts.length - 1]);
-      for (let i = 0; i < parts.length; i++) segs.push(lm && i < parts.length - 1 && !MODS.some((m) => parts[i].endsWith(m)) && tokenizePoints(parts[i], dict) ? parts[i] + lm[1] : parts[i]);
-    }
-    const res = { points: [], same: false, pre: [], post: [], feel: [], noMoxa: false, moxaTo: '' };
-    for (let seg of segs) {
-      if (/^(一样|同上|同前|同上次|和上次一样|跟上次一样|同前方)$/.test(seg)) {
-        res.same = true;
-        continue;
-      }
-      if (/(没|不|未|停)(灸|温针)/.test(seg)) res.noMoxa = true;
-      const mx = /(?:灸|温针)(?:换到|改到|换成|改成|移到|挪到)([\u4e00-\u9fa5]{2,4})/.exec(seg);
-      if (mx && dict.includes(mx[1])) res.moxaTo = canon(mx[1]);
-      const fm = /^(针后|扎后|扎完|拔针后|起针后|反馈)(.*)$/.exec(seg);
-      if (fm) {
-        if (fm[2]) res.feel.push(fm[2]);
-        continue;
-      }
-      let add = false;
-      const am = /^(加了|加上|加)(.+)$/.exec(seg);
-      if (am && tokenizePoints(am[2], dict)) {
-        add = true;
-        seg = am[2];
-      }
-      let toks = tokenizePoints(seg, dict);
-      if (!toks) {
-        // 书上没有的短名字（2~4 个字、不像一句话）当作穴位
-        let core = seg.replace(/穴$/, '');
-        let side = '';
-        let mod = '';
-        const sm = /^(双|左|右)/.exec(core);
-        if (sm) (side = sm[1]), (core = core.slice(1));
-        const md = MODS.find((m) => core.endsWith(m) && core.length > m.length);
-        if (md) (mod = md === '温针灸' ? '温针' : md === '放血' ? '刺血' : md), (core = core.slice(0, -md.length));
-        if (/^[一-龥]{1,4}$/.test(core) && (!REMARK.test(core) || SEED_CUSTOM.includes(core)) && (res.points.length || side || mod || segs.length > 2)) toks = [{ name: core, side, mod }];
-      }
-      if (toks) {
-        if (add) res.same = true;
-        for (const t of toks) {
-          const lab = labelOf(t);
-          if (groups[t.name] && !t.side && !t.mod) for (const x of groups[t.name]) addPoint(res.points, x);
-          else addPoint(res.points, lab);
+      const lm = subs.length > 1 && /(刺血|放血|点刺)$/.exec(subs[subs.length - 1]);
+      for (let si = 0; si < subs.length; si++) {
+        let seg = subs[si];
+        if (lm && si < subs.length - 1 && !MODS.some((m) => seg.endsWith(m)) && tokenizePoints(seg, dict)) seg += lm[1];
+        if (/^(一样|同上|同前|同上次|和上次一样|跟上次一样|同前方|其他一样|其余一样|别的一样|其它一样)$/.test(seg)) {
+          res.same = true;
+          continue;
         }
-      } else (res.points.length || res.same ? res.post : res.pre).push(seg);
+        if (/^(刺血|放血|还刺血|也刺血)$/.test(seg)) {
+          res.same = true; // 「刺血，加合谷」：照上次刺血
+          continue;
+        }
+        if (/^按第一次(来|的)?$/.test(seg)) {
+          res.first = true;
+          continue;
+        }
+        if (/^(不|没|未|停)(刺血|放血)$/.test(seg)) {
+          res.noBlood = true;
+          res.same = true;
+          remark(seg);
+          continue;
+        }
+        if (/^下次/.test(seg)) {
+          remark(seg);
+          continue;
+        }
+        const fm = /^(针后|扎后|扎完|拔针后|起针后|反馈)(.*)$/.exec(seg);
+        if (fm) {
+          if (fm[2]) res.feel.push(fm[2]);
+          continue;
+        }
+        // 不灸：「没灸」「关元不灸」「不灸暖宫」
+        const nm1 = /^(没|不|未|停)(灸|温针)(.*)$/.exec(seg);
+        const nm2 = /^(.+?)(不灸|没灸|不温针)$/.exec(seg);
+        if (nm1 || nm2) {
+          const who = nm1 ? nm1[3] : nm2[1];
+          const tk = who && tokenizePoints(who, dict);
+          res.noMoxa.push(tk ? canon(tk[0].name) : '*');
+          res.same = true;
+          remark(seg);
+          continue;
+        }
+        const mx = /(?:灸|温针)(?:换到|改到|换成|改成|移到|挪到)([一-龥]{2,4})/.exec(seg);
+        if (mx && dict.includes(mx[1])) {
+          res.moxaTo = canon(mx[1]);
+          res.same = true;
+          remark(seg);
+          continue;
+        }
+        // 去掉：「不要疏肝」「疏肝不要」「去阴陵泉、曲池」「去仙骨加阳陵泉」
+        let rm = /^(不要|去掉|去|减去|拿掉|不扎)(.+)$/.exec(seg);
+        const rm2 = /^(.+?)(不要|去掉|不扎了?)$/.exec(seg);
+        if (!rm && rm2 && tokenizePoints(rm2[1], dict)) rm = [seg, '去', rm2[1]];
+        if (rm || (mode === 'remove' && tokenizePoints(seg, dict))) {
+          let body = rm ? rm[2] : seg;
+          let addPart = '';
+          const ap = /^(.+?)加(.+)$/.exec(body);
+          if (ap && tokenizePoints(ap[1], dict) && tokenizePoints(ap[2], dict)) (body = ap[1]), (addPart = ap[2]);
+          const tk = tokenizePoints(body, dict);
+          if (tk) {
+            for (const t of tk) res.remove.push(labelOf(t));
+            res.same = true;
+            mode = 'remove';
+            if (addPart) {
+              addTok(tokenizePoints(addPart, dict), '', true);
+              mode = '';
+            }
+            continue;
+          }
+        }
+        mode = mode === 'remove' && !/^加/.test(seg) ? mode : '';
+        let add = false;
+        const am = /^(加了|加上|加)(.+)$/.exec(seg);
+        if (am && tokenizePoints(am[2], dict)) {
+          add = true;
+          seg = am[2];
+        }
+        let toks = tokenizePoints(seg, dict);
+        let pre = '';
+        if (!toks) {
+          // 前面有用途说明：「止痒血海」「噩梦商丘」「只扎了三里和疏肝」「灸隐白」「腿肿加太溪」
+          const pm = PRE_NOTE.exec(seg) || /^([一-龥]{1,4}?)(加|灸)(?=[一-龥])/.exec(seg);
+          if (pm) {
+            const t2 = tokenizePoints(seg.slice(pm[0].length), dict);
+            if (t2) {
+              toks = t2;
+              pre = pm[0];
+              if (/^只/.test(pre)) res.only = true;
+              if (/加$/.test(pre)) add = true;
+            }
+          }
+        }
+        let tail = '';
+        if (!toks) {
+          // 「疏肝没感觉」「颈背不胀痛了」：前面是穴位，后面是效果
+          for (let k = seg.length - 1; k > 0; k--) {
+            if (!EVAL_TAIL.test(seg.slice(k))) continue;
+            const t3 = tokenizePoints(seg.slice(0, k), dict);
+            if (t3 && !(t3.length === 1 && AREAS.has(t3[0].name))) {
+              toks = t3;
+              tail = seg.slice(k);
+              break;
+            }
+          }
+        }
+        if (toks) {
+          if (add) res.same = true;
+          addTok(toks, pre, add);
+          if (tail) res.post.push(tail);
+        } else remark(seg.replace(/\u2063/g, '，'));
+      }
     }
+    if (res.only) res.same = false;
     return res;
   }
 
@@ -415,6 +547,14 @@
     return out;
   }
 
+  function looksLikePoints(x, dict) {
+    if (tokenizePoints(x, dict)) return true;
+    const pm = PRE_NOTE.exec(x);
+    if (pm && tokenizePoints(x.slice(pm[0].length), dict)) return true;
+    for (let k = x.length - 1; k > 0; k--) if (EVAL_TAIL.test(x.slice(k)) && tokenizePoints(x.slice(0, k), dict)) return true;
+    return false;
+  }
+
   // 开头的「姓名，女，47：主诉」
   function parseHeader(h, dict, names) {
     const r = { name: '', patientId: null, gender: '', age: null, complaint: [], rest: '' };
@@ -439,7 +579,7 @@
       else if (/^(男|女)(\d{1,3})岁?$/.test(x)) {
         r.gender = x[0];
         r.age = +/\d+/.exec(x)[0];
-      } else if (parseSession(x, dict, {}).points.length && !REMARK.test(x.replace(/[刺血温针灸]/g, ''))) break;
+      } else if (looksLikePoints(normText(x), dict)) break;
       else r.complaint.push(x);
     }
     // 从第一个穴位开始（没写日期的第一次）
@@ -468,32 +608,57 @@
     const items = [];
     let cur = null; // 当前患者 { name, patientId, gender, age, complaint, lastPoints, lastDate }
 
+    const isMoxa = (p) => /（[^）]*(灸|温针)[^）]*）/.test(p);
+    const stripMoxa = (p) => p.replace(/（([^）]*)）/, (m, inner) => {
+      const rest = inner.split('，').filter((x) => !/^(灸|温针)$/.test(x));
+      return rest.length ? `（${rest.join('，')}）` : '';
+    });
+    const sameSide = (a, b) => pointBase(a) === pointBase(b) && (!pointSide(b) || pointSide(a) === pointSide(b));
     const pushSession = (date, body, raw) => {
       const ps = parseSession(body, dict, groups);
       let pts = ps.points;
-      if (cur && cur.lastPoints && (ps.same || !pts.length)) {
-        const base = cur.lastPoints.slice();
-        for (const p of pts) addPoint(base, p);
+      const base0 = ps.first && cur && cur.firstPoints ? cur.firstPoints : cur && cur.lastPoints;
+      // 「8.18脖子」：只写了部位，是在上次的基础上加
+      if (pts.length && pts.every((p) => AREAS.has(pointBase(p).replace(/（.*$/, '')))) ps.same = true;
+      if (base0 && !ps.only && (ps.same || ps.first || !pts.length)) {
+        const base = base0.slice();
+        for (const p of pts) {
+          // 「左还巢、右妇科」：原来是右还巢、左妇科 → 换边
+          const sd = pointSide(p);
+          const j = sd && sd !== '双' && !ps.added.includes(pointBase(p)) ? base.findIndex((x) => pointBase(x) === pointBase(p) && ['左', '右'].includes(pointSide(x)) && pointSide(x) !== sd) : -1;
+          if (j >= 0) base[j] = p;
+          else addPoint(base, p);
+        }
         pts = base;
       }
+      // 「不刺血」：这次起不刺血了（以后写了刺血再加回来）
+      if (ps.noBlood) pts = pts.filter((p) => !/刺血|放血|点刺/.test(p));
+      // 「不要疏肝」「去仙骨」
+      if (ps.remove.length) pts = pts.filter((p) => !ps.remove.some((r) => sameSide(p, r)));
       // 「灸换到中脘」：原来灸的地方不灸了，改灸中脘（以后也照这样）
       if (ps.moxaTo) {
-        pts = pts.filter((p) => !(/（[^）]*灸[^）]*）/.test(p) && pointBase(p.replace(/（[^）]*）/g, '')) === '神阙')).map((p) => p.replace(/（(灸|温针)）/, ''));
+        pts = pts.filter((p) => !(isMoxa(p) && pointBase(p) === '神阙')).map(stripMoxa);
         const i = pts.findIndex((p) => pointBase(p) === ps.moxaTo);
         const mod = /温针/.test(body) ? '温针' : '灸';
-        if (i >= 0) pts[i] = `${pts[i]}（${mod}）`;
+        if (i >= 0) pts[i] = labelOf({ name: pts[i].replace(/（.*$/, ''), side: pointSide(pts[i]) === '双' ? '双' : '', mod, note: '' });
         else pts.push(`${ps.moxaTo}（${mod}）`);
       }
       const keep = pts.slice();
-      // 「没灸」：这一次不灸（下次写「一样」时还按原来的）
-      if (ps.noMoxa) pts = pts.filter((p) => pointBase(p.replace(/（[^）]*）/g, '')) !== '神阙' || !/灸/.test(p)).map((p) => p.replace(/（(灸|温针)）/, ''));
+      // 这一次「没灸」（下次写「一样」时还按原来的）
+      if (ps.noMoxa.length)
+        pts = pts
+          .filter((p) => !(isMoxa(p) && pointBase(p) === '神阙'))
+          .map((p) => (ps.noMoxa.includes('*') || ps.noMoxa.includes(pointBase(p)) ? stripMoxa(p) : p));
+      // 刺血不会一直「一样」下去：上次刺血、这次没写刺血但写了「一样」的，照上次（原文就是这么记的）
       const remarks = (list) => list.join('，');
-      const sym = ps.pre.length && ps.points.length ? remarks(ps.pre) : cur && cur.complaint ? cur.complaint : '';
+      const complaint = cur && cur.complaint ? cur.complaint : '';
+      const sym = ps.pre.length && ps.points.length ? [complaint, remarks(ps.pre)].filter(Boolean).join('；') : complaint;
       const feel = [ps.points.length ? '' : remarks(ps.pre), remarks(ps.post), remarks(ps.feel)].filter(Boolean).join('，');
-      const it = { date: date || (cur && cur.lastDate) || null, noDate: !date, patientId: cur ? cur.patientId : null, name: cur ? cur.name : '', gender: cur ? cur.gender : '', age: cur ? cur.age : null, points: pts, symptoms: sym, feeling: feel, raw };
+      const it = { date: date || null, noDate: !date, patientId: cur ? cur.patientId : null, name: cur ? cur.name : '', gender: cur ? cur.gender : '', age: cur ? cur.age : null, points: pts, symptoms: sym, feeling: feel, raw };
       items.push(it);
       if (cur) {
         if (keep.length) cur.lastPoints = keep;
+        if (keep.length && !cur.firstPoints) cur.firstPoints = keep;
         if (date) cur.lastDate = date;
       }
     };

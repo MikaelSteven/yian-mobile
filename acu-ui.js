@@ -235,7 +235,7 @@ window.AcuUIFactory = function (api) {
   function rowHtml(a) {
     const time = a.startAt ? hhmm(a.startAt) + (a.endAt ? '–' + hhmm(a.endAt) : '') : '';
     return `<button class="vrow" data-act="acu-open" data-id="${esc(a.id)}">
-      <div class="h"><b>${esc(nameOf(a))}</b><span style="color:var(--muted)">${esc(a.date || '')}${time ? ' ' + time : ''}${a.bed ? ` · ${a.bed}号床` : ''}</span>${Acu.isActive(a) ? '<span class="tag">留针中</span>' : ''}</div>
+      <div class="h"><b>${esc(nameOf(a))}</b><span style="color:var(--muted)">${esc(a.date || '日期不详')}${time ? ' ' + time : ''}${a.bed ? ` · ${a.bed}号床` : ''}</span>${Acu.isActive(a) ? '<span class="tag">留针中</span>' : ''}</div>
       ${a.symptoms ? `<div class="c">${esc(a.symptoms)}</div>` : ''}
       <div class="r">${esc(ptsLine(a.points)) || '（未写穴位）'}</div>
       ${a.feeling ? `<div class="r" style="color:var(--green)">针后：${esc(a.feeling)}</div>` : ''}
@@ -757,8 +757,10 @@ window.AcuUIFactory = function (api) {
   async function doImport() {
     const st = S.acuImp;
     const items = st.items.filter((x) => x.on);
-    const bad = items.find((x) => !x.date || !(x.patientId || x.name));
-    if (bad) return toast('有一条没有日期或患者，请补上或取消勾选', 'warn');
+    const bad = items.find((x) => !(x.patientId || x.name));
+    if (bad) return toast('有一条没有患者，请补上或取消勾选', 'warn');
+    const nd = items.filter((x) => !x.date).length;
+    if (nd && !(await confirmSheet('有记录没有日期', `有 ${nd} 条没有日期，会记成「日期不详」，以后可以再补。继续吗？`, '继续'))) return;
     const newNames = [...new Set(items.filter((x) => !x.patientId).map((x) => x.name))];
     const infoOf = (name) => items.find((x) => !x.patientId && x.name === name && (x.gender || x.age != null)) || {};
     if (newNames.length && !(await confirmSheet('会新建患者', `下面这些名字在患者列表里没有，会新建档案：\n${newNames.join('、')}`, '继续导入'))) return;
@@ -778,7 +780,7 @@ window.AcuUIFactory = function (api) {
             db.patients.push({ id: pid, name: x.name, gender: inf.gender || '', birth: '', birthYear: by, phone: '', allergy: '', history: '', note: '', tags: [], py: null, pyFull: null, createdAt: now, updatedAt: now });
           }
         }
-        db.acu.push({ id: Acu.uid(), patientId: pid, date: x.date, bed: null, points: x.points.slice(), symptoms: x.symptoms || '', feeling: x.feeling || '', note: '', status: 'done', startAt: null, endAt: null, manip: [], imported: true, createdAt: now, updatedAt: now });
+        db.acu.push({ id: Acu.uid(), patientId: pid, date: x.date || null, bed: null, points: x.points.slice(), symptoms: x.symptoms || '', feeling: x.feeling || '', note: '', status: 'done', startAt: null, endAt: null, manip: [], imported: true, createdAt: now, updatedAt: now });
       }
     });
     if (!ok) return;
