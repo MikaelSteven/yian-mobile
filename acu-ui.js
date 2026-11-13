@@ -24,7 +24,8 @@ window.AcuUIFactory = function (api) {
   };
   const mins = (m) => Math.max(0, Math.floor(m));
   const ptsLine = (pts) => (pts || []).join('、');
-  const totalNeedles = (pts) => (pts || []).reduce((n, p) => n + Acu.needleCount(p), 0);
+  const groups = () => Acu.groupsOf(S.db.settings);
+  const customPoints = () => [...Acu.pointUsage(S.db.acu).keys()].filter((k) => !Acu.isKnownPoint(k));
 
   // ============================================================
   // 闹钟
@@ -308,7 +309,7 @@ window.AcuUIFactory = function (api) {
       showSug();
     };
     const add = (txt) => {
-      for (const p of Acu.splitPoints(txt)) if (!d.points.includes(p)) d.points.push(p);
+      for (const p of Acu.expandGroups(Acu.splitPoints(txt), groups())) Acu.addPoint(d.points, p);
       inp.value = '';
       onChange();
       redraw();
@@ -319,13 +320,14 @@ window.AcuUIFactory = function (api) {
       const side = /^(双|左|右)/.exec(raw);
       const q = side ? raw.slice(1) : raw;
       let names;
-      if (q) names = Acu.searchPoints(q, usage(), 14);
+      if (q) names = Acu.searchPoints(q, usage(), 14, groups());
       else {
         const u = [...usage().entries()].sort((a, b) => b[1] - a[1]).map((x) => x[0]);
         names = [...new Set(u.concat(COMMON))].slice(0, 16);
       }
       names = names.filter((n) => !d.points.some((p) => Acu.pointBase(p) === n));
-      s.innerHTML = names.map((n) => `<button type="button" class="sg" data-name="${esc((side ? side[1] : '') + n)}">${esc((side ? side[1] : '') + n)}</button>`).join('') + (q && /[\u4e00-\u9fa5]/.test(q) && !names.includes(q) ? `<button type="button" class="sg raw" data-name="${esc(raw)}">加「${esc(raw)}」</button>` : '');
+      const gs = groups();
+      s.innerHTML = names.map((n) => (gs[n] ? `<button type="button" class="sg grp" data-name="${esc(n)}" title="${esc(gs[n].join('、'))}">${esc(n)}<small>${gs[n].length}穴</small></button>` : `<button type="button" class="sg" data-name="${esc((side ? side[1] : '') + n)}">${esc((side ? side[1] : '') + n)}</button>`)).join('') + (q && /[\u4e00-\u9fa5]/.test(q) && !names.includes(q) ? `<button type="button" class="sg raw" data-name="${esc(raw)}">加「${esc(raw)}」</button>` : '');
     }
     $('#ptIn').addEventListener('input', (e) => {
       const v = e.target.value;
@@ -412,7 +414,7 @@ window.AcuUIFactory = function (api) {
     const last = d.patientId ? acuOf(d.patientId).find((a) => a.id !== d.id && (a.points || []).length) : null;
     return `<form id="aform" autocomplete="off" onsubmit="return false">
       <div class="card"><h3>患者${d.bed ? `<span class="bedtag">${d.bed}号床</span>` : ''}</h3><div id="pickBox">${patientPickHtml(d)}</div></div>
-      <div class="card"><h3 class="hflex">穴位 <small id="ncount">${d.points.length ? `${d.points.length} 穴 · ${totalNeedles(d.points)} 针` : ''}</small>${last ? `<button type="button" class="lbtn right" data-act="acu-last">用上次的（${esc(last.date)}）</button>` : ''}</h3>${ptsEditorHtml(d.points)}</div>
+      <div class="card"><h3 class="hflex">穴位 <small id="ncount">${d.points.length ? `${d.points.length} 穴` : ''}</small>${last ? `<button type="button" class="lbtn right" data-act="acu-last">用上次的（${esc(last.date)}）</button>` : ''}</h3>${ptsEditorHtml(d.points)}</div>
       <div class="card"><h3>症状 <small>选填</small></h3><textarea id="aSym" rows="2" placeholder="这次哪里不舒服">${esc(d.symptoms || '')}</textarea></div>
       ${
         isNew
@@ -455,7 +457,7 @@ window.AcuUIFactory = function (api) {
     bindPts(d, () => {
       S.dirty = !!d.id;
       const n = $('#ncount');
-      if (n) n.textContent = d.points.length ? `${d.points.length} 穴 · ${totalNeedles(d.points)} 针` : '';
+      if (n) n.textContent = d.points.length ? `${d.points.length} 穴` : '';
     });
     $('#aform').addEventListener('input', (e) => {
       if (e.target.id === 'ptIn' || e.target.id === 'pq') return;
@@ -470,7 +472,7 @@ window.AcuUIFactory = function (api) {
     if (v('aSym') !== undefined) d.symptoms = v('aSym').trim();
     if (v('aFeel') !== undefined) d.feeling = v('aFeel').trim();
     const pending = v('ptIn');
-    if (pending && pending.trim()) for (const p of Acu.splitPoints(pending)) if (!d.points.includes(p)) d.points.push(p);
+    if (pending && pending.trim()) for (const p of Acu.expandGroups(Acu.splitPoints(pending), groups())) Acu.addPoint(d.points, p);
     if (v('aDate') !== undefined && v('aDate')) d.date = v('aDate');
     if (v('aBed') !== undefined) d.bed = Number(v('aBed')) || null;
     const setTime = (key, val) => {
@@ -562,11 +564,11 @@ window.AcuUIFactory = function (api) {
   async function removeFlow(id) {
     const a = getAcu(id);
     if (!Acu.isActive(a)) return;
-    const pts = (a.points || []).slice();
+    const pts = (a.points || []).filter(Acu.needsRemoval);
+    const skip = (a.points || []).filter((p) => !Acu.needsRemoval(p));
     const body = document.createElement('div');
-    const n = totalNeedles(pts);
-    body.innerHTML = `${pts.length ? `<p class="sheet-sub">拔一个点一个，全部点完才能确认（共 ${pts.length} 穴、${n} 针）</p>
-        <div class="rmv">${pts.map((p, i) => `<button type="button" class="rp" data-i="${i}"><span>${esc(p)}</span>${Acu.needleCount(p) > 1 ? '<small>2 针</small>' : ''}</button>`).join('')}</div>
+    body.innerHTML = `${pts.length ? `<p class="sheet-sub">拔一个点一个，全部点完才能确认（共 ${pts.length} 处）${skip.length ? `<br>刺血、灸的不用拔：${esc(skip.join('、'))}` : ''}</p>
+        <div class="rmv">${pts.map((p, i) => `<button type="button" class="rp" data-i="${i}"><span>${esc(p)}</span>${Acu.needleCount(p) > 1 ? '<small>两侧</small>' : ''}</button>`).join('')}</div>
         <p class="rmv-c" id="rmvC">已核对 0 / ${pts.length}</p>`
       : '<p>这次没有写穴位，无法逐个核对。请自己确认针都拔干净了。</p>'}
       <label class="field" style="margin-top:10px"><span>针后感觉（选填）</span><textarea id="rFeel" rows="2" style="min-height:60px">${esc(a.feeling || '')}</textarea></label>`;
@@ -623,7 +625,7 @@ window.AcuUIFactory = function (api) {
       title: `${a.bed}号床 · ${nameOf(a)}`,
       body: `<div class="kv"><b>开始</b><span>${hhmm(a.startAt)}（已留 ${mins(st.elapsed)} 分）</span></div>
         <div class="kv"><b>拔针</b><span>${hhmm(new Date(st.removeAt).toISOString())}${st.due ? ' <b class="red">已到时间</b>' : ''}</span></div>
-        <div class="kv"><b>穴位</b><span>${esc(ptsLine(a.points)) || '—'}${a.points && a.points.length ? `（${totalNeedles(a.points)} 针）` : ''}</span></div>
+        <div class="kv"><b>穴位</b><span>${esc(ptsLine(a.points)) || '—'}</span></div>
         ${a.symptoms ? `<div class="kv"><b>症状</b><span>${esc(a.symptoms)}</span></div>` : ''}
         <div class="kv"><b>行针</b><span>${(a.manip || []).length ? a.manip.map((t) => hhmm(t)).join('、') : '还没有'}</span></div>`,
       buttons: [
@@ -692,8 +694,8 @@ window.AcuUIFactory = function (api) {
         .map(
           (x, i) => `<div class="card imp${x.on ? '' : ' off'}" data-i="${i}">
         <label class="impchk"><input type="checkbox" data-k="on" ${x.on ? 'checked' : ''}/> 导入这条${x.dup ? ' <span class="tag red">可能重复</span>' : ''}</label>
-        <div class="two"><label class="field"><span>日期</span><input type="date" data-k="date" value="${esc(x.date || '')}" /></label>
-        <label class="field"><span>患者${x.patientId ? '' : ' <em class="newp">新建</em>'}</span><input type="text" data-k="name" value="${esc(x.name || '')}" list="impNames" /></label></div>
+        <div class="two"><label class="field"><span>日期${x.noDate ? ' <em class="newp">原文没写日期</em>' : ''}</span><input type="date" data-k="date" value="${esc(x.date || '')}" /></label>
+        <label class="field"><span>患者${x.patientId ? '' : ` <em class="newp">新建${esc([x.gender, x.age != null ? x.age + '岁' : ''].filter(Boolean).join(' '))}</em>`}</span><input type="text" data-k="name" value="${esc(x.name || '')}" list="impNames" /></label></div>
         <label class="field"><span>穴位（${x.points.length}）</span><input type="text" data-k="points" value="${esc(x.points.join('、'))}" /></label>
         <label class="field"><span>症状</span><input type="text" data-k="symptoms" value="${esc(x.symptoms || '')}" /></label>
         <label class="field"><span>针后感觉</span><input type="text" data-k="feeling" value="${esc(x.feeling || '')}" /></label>
@@ -740,7 +742,7 @@ window.AcuUIFactory = function (api) {
     const st = S.acuImp;
     const t = ($('#impText') || {}).value || st.text;
     st.text = t;
-    const items = Acu.parseImport(t, { patients: patientsActive(), today: Acu.todayStr() });
+    const items = Acu.parseImport(t, { patients: patientsActive(), today: Acu.todayStr(), custom: customPoints(), groups: groups() });
     if (!items.length) return toast('没有识别出内容', 'warn');
     const have = new Set(acuList().map((a) => a.patientId + '|' + a.date + '|' + (a.points || []).map(Acu.pointBase).sort().join(',')));
     for (const x of items) {
@@ -758,6 +760,7 @@ window.AcuUIFactory = function (api) {
     const bad = items.find((x) => !x.date || !(x.patientId || x.name));
     if (bad) return toast('有一条没有日期或患者，请补上或取消勾选', 'warn');
     const newNames = [...new Set(items.filter((x) => !x.patientId).map((x) => x.name))];
+    const infoOf = (name) => items.find((x) => !x.patientId && x.name === name && (x.gender || x.age != null)) || {};
     if (newNames.length && !(await confirmSheet('会新建患者', `下面这些名字在患者列表里没有，会新建档案：\n${newNames.join('、')}`, '继续导入'))) return;
     const now = new Date().toISOString();
     const ok = await commit((db) => {
@@ -770,7 +773,9 @@ window.AcuUIFactory = function (api) {
           if (!pid) {
             pid = Logic.uid('p');
             made.set(x.name, pid);
-            db.patients.push({ id: pid, name: x.name, gender: '', birth: '', birthYear: '', phone: '', allergy: '', history: '', note: '', tags: [], py: null, pyFull: null, createdAt: now, updatedAt: now });
+            const inf = infoOf(x.name);
+            const by = inf.age != null ? String(+String(inf.date || Acu.todayStr()).slice(0, 4) - inf.age) : '';
+            db.patients.push({ id: pid, name: x.name, gender: inf.gender || '', birth: '', birthYear: by, phone: '', allergy: '', history: '', note: '', tags: [], py: null, pyFull: null, createdAt: now, updatedAt: now });
           }
         }
         db.acu.push({ id: Acu.uid(), patientId: pid, date: x.date, bed: null, points: x.points.slice(), symptoms: x.symptoms || '', feeling: x.feeling || '', note: '', status: 'done', startAt: null, endAt: null, manip: [], imported: true, createdAt: now, updatedAt: now });
@@ -799,10 +804,36 @@ window.AcuUIFactory = function (api) {
       <div class="kv"><b>留针</b><span class="stepper"><button type="button" class="lbtn" data-act="acu-dur" data-d="-5">－</button><b>${c.duration} 分钟</b><button type="button" class="lbtn" data-act="acu-dur" data-d="5">＋</button></span></div>
       <div class="kv"><b>行针间隔</b><span class="stepper"><button type="button" class="lbtn" data-act="acu-int" data-d="-5">－</button><b>${c.interval ? c.interval + ' 分钟' : '不提醒'}</b><button type="button" class="lbtn" data-act="acu-int" data-d="5">＋</button></span></div>
       <div class="kv"><b>闹钟</b><span id="permBox">检查中…</span></div>
+      <label class="field" style="margin-top:8px"><span>穴组（一行一个：名称：穴位、穴位…）</span><textarea id="grpText" rows="3" style="width:100%;padding:8px;border:1px solid var(--line-2);border-radius:8px;font-size:15px">${esc(groupsText())}</textarea></label>
+      <button class="btn block" data-act="acu-groups">保存穴组</button>
       <div class="two"><button class="btn" data-act="acu-test" data-k="manip">试听行针铃</button><button class="btn" data-act="acu-test" data-k="remove">试听拔针铃</button></div>
       <p class="hint">床位排布：右上 1、右下 2、左上 3、左下 4，加的床位继续往左排。改了留针时长只影响之后开始的人。</p>
     </div>`;
   }
+  function groupsText() {
+    const g = groups();
+    return Object.keys(g)
+      .map((k) => `${k}：${g[k].join('、')}`)
+      .join('\n');
+  }
+  async function saveGroups() {
+    const t = ($('#grpText') || {}).value || '';
+    const out = {};
+    for (const line of t.split('\n')) {
+      const m = /^\s*([^：:]+?)\s*[：:]\s*(.+)$/.exec(line);
+      if (!m) continue;
+      const pts = Acu.splitPoints(m[2]);
+      if (pts.length) out[m[1]] = pts;
+    }
+    // 默认的穴组被删掉了：记成空，表示不要
+    for (const k of Object.keys(Acu.DEFAULT_GROUPS)) if (!out[k]) out[k] = [];
+    const ok = await commit((db) => {
+      db.settings = db.settings || {};
+      db.settings.acu = Object.assign({}, db.settings.acu, { groups: out });
+    });
+    if (ok) toast('穴组已保存');
+  }
+
   async function fillPerm() {
     const box = $('#permBox');
     if (!box) return;
@@ -947,6 +978,7 @@ window.AcuUIFactory = function (api) {
       await testAlarm(el.dataset.k);
       fillPerm();
     },
+    'acu-groups': () => saveGroups(),
     'acu-perm': async () => {
       await askPerms();
       fillPerm();

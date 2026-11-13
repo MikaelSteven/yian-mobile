@@ -87,10 +87,17 @@
     return ALIAS[s] || s;
   }
   // 这个写法代表几根针：标了「双」的算 2 根，其余 1 根
+  // 刺血、点刺、单纯灸的不留针，拔针时不用核对（温针要拔）
   function needleCount(p) {
-    return /双|两侧/.test(String(p || '')) ? 2 : 1;
+    const s = String(p || '');
+    if (/刺血|放血|点刺|拔罐/.test(s)) return 0;
+    if (/灸/.test(s) && !/温针/.test(s)) return 0;
+    if (pointBase(s) === '神阙') return 0;
+    return /双|两侧/.test(s) ? 2 : 1;
   }
-  const isKnownPoint = (p) => PY.has(pointBase(p));
+  // 拔针时要核对的（留着针的）
+  const needsRemoval = (p) => needleCount(p) > 0;
+  const isKnownPoint = (p) => pointBase(p).split('透').every((x) => PY.has(ALIAS[x] || (x === '三里' ? '足三里' : x)));
 
   // 统计用过的穴位次数（用得多的排在补全前面）
   function pointUsage(acuList) {
@@ -106,9 +113,12 @@
   }
 
   // 补全：输入穴名的一部分或拼音首字母（zsl → 足三里）
-  function searchPoints(q, usage, limit = 12) {
+  const GROUP_PY = { 老十针: 'lsz', 上中下脘: 'szxw' };
+  function searchPoints(q, usage, limit = 12, groups) {
     q = String(q || '').trim().toLowerCase();
     if (!q) return [];
+    // 穴组（老十针…）排最前
+    const gs = groups ? Object.keys(groups).filter((g) => g.startsWith(q) || g.includes(q) || (GROUP_PY[g] || '').startsWith(q)) : [];
     const extra = usage ? [...usage.keys()].filter((k) => !PY.has(k)) : [];
     const res = [];
     for (const name of POINTS.concat(extra)) {
@@ -124,7 +134,7 @@
       res.push({ name, score });
     }
     res.sort((a, b) => b.score - a.score || a.name.length - b.name.length);
-    return res.slice(0, limit).map((r) => r.name);
+    return gs.concat(res.map((r) => r.name).filter((n) => !gs.includes(n))).slice(0, limit);
   }
 
   // ---------- 留针计时 ----------
@@ -199,152 +209,343 @@
     return { cols, beds: out };
   }
 
+  // ---------- 穴组（一个名字代表一组穴位，如「老十针」） ----------
+  const DEFAULT_GROUPS = { 老十针: ['上脘', '中脘', '下脘', '天枢', '气海', '足三里', '太冲', '内关', '关元'], 上中下脘: ['上脘', '中脘', '下脘'] };
+  // 设置里写的穴组：{ 名称: [穴位…] }，和默认的合在一起
+  function groupsOf(settings) {
+    const g = Object.assign({}, DEFAULT_GROUPS);
+    const u = settings && settings.acu && settings.acu.groups;
+    if (u && typeof u === 'object')
+      for (const k of Object.keys(u)) {
+        if (!Array.isArray(u[k])) continue;
+        if (u[k].length) g[k] = u[k].slice();
+        else delete g[k]; // 设置里删掉了
+      }
+    return g;
+  }
+  // 「老十针」→ 展开成 9 个穴位；同一个穴位后面写了刺法（「中脘（温针）」）的，用后面的
+  function expandGroups(points, groups) {
+    const out = [];
+    for (const p of points || []) {
+      const list = groups && groups[p] ? groups[p] : [p];
+      for (const x of list) addPoint(out, x);
+    }
+    return out;
+  }
+  function addPoint(list, p) {
+    const base = pointBase(p);
+    const i = list.findIndex((x) => pointBase(x) === base && pointSide(x) === pointSide(p));
+    if (i < 0) list.push(p);
+    else if (p.length > list[i].length) list[i] = p; // 后写的带刺法 / 方位，更具体
+  }
+  const pointSide = (p) => {
+    const m = /^(双|左|右)/.exec(String(p || '')) || /[（(](双|左|右)[)）]/.exec(String(p || ''));
+    return m ? m[1] : '';
+  };
+
   // ---------- 文字导入（手机记事本里的旧记录） ----------
-  const CN_NUM = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10 };
-  // 找日期：2026.11.8 / 2026-11-08 / 2026年11月8日 / 11月8日 / 11.8 / 11/8
-  const DATE_RE = /(?:(20\d{2}|\d{2})\s*[年.\-\/]\s*)?(\d{1,2})\s*[月.\-\/]\s*(\d{1,2})\s*[日号]?/;
-  function findDate(s, today) {
-    const m = DATE_RE.exec(s);
-    if (!m) return null;
+  // 支持两种写法：
+  //  A. 一位患者一段：「洪芸，女，47：失眠，腰突。10.31委中刺血，太冲，…。11.12加右仙骨」
+  //     段里按日期分成多次；「一样」＝和上次一样；「加…」＝上次的基础上再加；其余的话当作感觉、备注
+  //  B. 一次一行：「11月8日 张三 失眠 百会 四神聪 针后睡意明显」
+  const ALIAS2 = Object.assign({ 三里: '足三里' }, ALIAS);
+  // 书上没有、但常写的穴位 / 部位（导入时当作穴位）。用过的自定义穴位也会自动加进来
+  const SEED_CUSTOM = ['仙骨', '足三重', '侧头', '火土', '间谷', '肩颈', '疏肝', '咽痛点', '四指尖', '灵骨', '大白', '肩中', '中白', '下白', '腕顺', '重子', '重仙', '叉三', '门金', '木穴', '正筋', '正宗', '三重', '驷马'];
+  const MODS = ['温针灸', '温针', '刺血', '放血', '点刺', '艾灸', '灸', '电针', '火针', '拔罐'];
+  const REMARK = /[了好疼痛不没觉得想胀麻热酸重轻样些晕吐醒肚说很太又还再才就也都能会要过时后前天次分钟小半但反胃病症咳嗽睡眠梦便尿汗饿渴累困拔扎往事啊吧呢吗的]/;
+  const DATE_ANY = /(?:(20\d{2})\s*[年.\-\/]\s*)?(?<!\d)(\d{1,2})\s*(?:[月.\-\/])\s*(\d{1,2})(?!\d)\s*[日号]?/g;
+
+  function makeDict(custom, groups) {
+    const names = new Set(POINTS.concat(Object.keys(ALIAS2), SEED_CUSTOM, custom || [], Object.keys(groups || {})));
+    return [...names].filter(Boolean).sort((a, b) => b.length - a.length);
+  }
+  const canon = (n) => ALIAS2[n] || n;
+
+  // 把一小段（逗号之间）认成穴位；认不出返回 null
+  // 「天枢气海足三里」「老十针加阳陵泉」「右液门透中渚」「委中刺血」「关元温针」「丰隆穴」「肾俞双侧」
+  function tokenizePoints(seg, dict) {
+    let s = seg.replace(/穴(?=$|[双左右透刺温灸])/g, '');
+    const out = [];
+    let i = 0;
+    while (i < s.length) {
+      const rest = s.slice(i);
+      const conn = /^(加了|加上|加|和|及|还有|配)/.exec(rest);
+      if (conn && out.length) {
+        i += conn[0].length;
+        continue;
+      }
+      let side = '';
+      const sm = /^(双侧|两侧|左侧|右侧|双|左|右)/.exec(rest);
+      if (sm) {
+        side = sm[1].replace(/侧$/, '').replace('两', '双');
+        i += sm[0].length;
+      }
+      const r2 = s.slice(i);
+      const name = dict.find((n) => r2.startsWith(n));
+      if (!name) {
+        // 前一个穴位后面跟着刺法：「咽痛点刺血」的「刺血」已在下面处理；这里是认不出的字
+        return null;
+      }
+      i += name.length;
+      let label = canon(name);
+      // 透刺：「液门透中渚」
+      const tm = /^透/.exec(s.slice(i));
+      if (tm) {
+        const r3 = s.slice(i + 1);
+        const n2 = dict.find((n) => r3.startsWith(n));
+        if (n2) {
+          label = label + '透' + canon(n2);
+          i += 1 + n2.length;
+        }
+      }
+      // 后面的「（双）」「双侧」
+      const pm = /^(?:[（(](双|左|右)[)）]|(双侧|两侧))/.exec(s.slice(i));
+      if (pm) {
+        side = (pm[1] || pm[2]).replace(/侧$/, '').replace('两', '双');
+        i += pm[0].length;
+      }
+      // 刺法：温针、刺血、灸…
+      let mod = '';
+      const r4 = s.slice(i);
+      const md = MODS.find((m) => r4.startsWith(m));
+      if (md) {
+        mod = md === '温针灸' ? '温针' : md === '放血' ? '刺血' : md;
+        i += md.length;
+      }
+      out.push({ name: label, side, mod });
+    }
+    return out.length ? out : null;
+  }
+  function labelOf(t) {
+    let l = t.name;
+    if (t.side) l = t.side === '双' ? `${l}（双）` : t.side + l;
+    if (t.mod) l = `${l}（${t.mod}）`.replace('）（', '，');
+    return l;
+  }
+
+  // 一段文字（一次就诊）→ { points（写出来的穴位）, same（写了「一样」或「加…」）, pre（穴位前的话）, post（穴位后的话） }
+  function parseSession(text, dict, groups) {
+    const segs = [];
+    for (const big of String(text || '').split(/[，,。；;：:\n\s]+/)) {
+      const parts = big
+        .split('、')
+        .map((x) => x.trim())
+        .filter(Boolean);
+      // 「少商、商阳、咽痛点刺血」：刺血写在最后，前面几个也是刺血
+      const lm = parts.length > 1 && /(刺血|放血|点刺)$/.exec(parts[parts.length - 1]);
+      for (let i = 0; i < parts.length; i++) segs.push(lm && i < parts.length - 1 && !MODS.some((m) => parts[i].endsWith(m)) && tokenizePoints(parts[i], dict) ? parts[i] + lm[1] : parts[i]);
+    }
+    const res = { points: [], same: false, pre: [], post: [], feel: [], noMoxa: false, moxaTo: '' };
+    for (let seg of segs) {
+      if (/^(一样|同上|同前|同上次|和上次一样|跟上次一样|同前方)$/.test(seg)) {
+        res.same = true;
+        continue;
+      }
+      if (/(没|不|未|停)(灸|温针)/.test(seg)) res.noMoxa = true;
+      const mx = /(?:灸|温针)(?:换到|改到|换成|改成|移到|挪到)([\u4e00-\u9fa5]{2,4})/.exec(seg);
+      if (mx && dict.includes(mx[1])) res.moxaTo = canon(mx[1]);
+      const fm = /^(针后|扎后|扎完|拔针后|起针后|反馈)(.*)$/.exec(seg);
+      if (fm) {
+        if (fm[2]) res.feel.push(fm[2]);
+        continue;
+      }
+      let add = false;
+      const am = /^(加了|加上|加)(.+)$/.exec(seg);
+      if (am && tokenizePoints(am[2], dict)) {
+        add = true;
+        seg = am[2];
+      }
+      let toks = tokenizePoints(seg, dict);
+      if (!toks) {
+        // 书上没有的短名字（2~4 个字、不像一句话）当作穴位
+        let core = seg.replace(/穴$/, '');
+        let side = '';
+        let mod = '';
+        const sm = /^(双|左|右)/.exec(core);
+        if (sm) (side = sm[1]), (core = core.slice(1));
+        const md = MODS.find((m) => core.endsWith(m) && core.length > m.length);
+        if (md) (mod = md === '温针灸' ? '温针' : md === '放血' ? '刺血' : md), (core = core.slice(0, -md.length));
+        if (/^[一-龥]{1,4}$/.test(core) && (!REMARK.test(core) || SEED_CUSTOM.includes(core)) && (res.points.length || side || mod || segs.length > 2)) toks = [{ name: core, side, mod }];
+      }
+      if (toks) {
+        if (add) res.same = true;
+        for (const t of toks) {
+          const lab = labelOf(t);
+          if (groups[t.name] && !t.side && !t.mod) for (const x of groups[t.name]) addPoint(res.points, x);
+          else addPoint(res.points, lab);
+        }
+      } else (res.points.length || res.same ? res.post : res.pre).push(seg);
+    }
+    return res;
+  }
+
+  // 日期：「10.31」「2026.11.8」「11月8日」；没写年份按今年，比今天还晚就算去年
+  function dateOf(m, today) {
     const mo = +m[2];
     const d = +m[3];
     if (mo < 1 || mo > 12 || d < 1 || d > 31) return null;
     let y;
-    if (m[1]) y = m[1].length === 2 ? 2000 + +m[1] : +m[1];
+    if (m[1]) y = +m[1];
     else {
-      // 没写年份：默认今年；如果算出来比今天还晚，就是去年
       const t = today || todayStr();
       y = +t.slice(0, 4);
       if (`${y}-${pad(mo)}-${pad(d)}` > t) y -= 1;
     }
-    return { date: `${y}-${pad(mo)}-${pad(d)}`, index: m.index, text: m[0] };
+    return `${y}-${pad(mo)}-${pad(d)}`;
   }
-
-  // 在一段文字里找出所有穴位（含左右双写法），按出现顺序
-  function findPoints(s) {
-    const found = [];
-    const taken = new Array(s.length).fill(false);
-    const names = BY_LEN.concat(Object.keys(ALIAS));
-    for (const name of names) {
-      let from = 0;
-      for (;;) {
-        const i = s.indexOf(name, from);
-        if (i < 0) break;
-        from = i + 1;
-        let a = i;
-        let b = i + name.length;
-        if ([...Array(name.length).keys()].some((k) => taken[i + k])) continue;
-        // 前面的「左/右/双」、后面的「（双）/双侧」也算进去
-        const pre = /(双侧|两侧|左侧|右侧|双|左|右)$/.exec(s.slice(Math.max(0, a - 2), a));
-        if (pre) a -= pre[1].length;
-        const post = /^(?:\s*[（(]\s*(双|双侧|左|右|左侧|右侧)\s*[)）]|(双侧|两侧))/.exec(s.slice(b));
-        let label = ALIAS[name] || name;
-        if (pre) label = pre[1].replace(/侧$/, '') + label;
-        if (post) {
-          b += post[0].length;
-          label = `${ALIAS[name] || name}（${(post[1] || post[2]).replace(/侧$/, '').replace('两', '双')}）`;
-        }
-        for (let k = a; k < b; k++) taken[k] = true;
-        found.push({ at: a, end: b, label });
-      }
+  function findDate(s, today) {
+    DATE_ANY.lastIndex = 0;
+    let m;
+    while ((m = DATE_ANY.exec(s))) {
+      const date = dateOf(m, today);
+      if (date) return { date, index: m.index, text: m[0] };
     }
-    found.sort((x, y) => x.at - y.at);
+    return null;
+  }
+  // 一段里所有的日期位置
+  function allDates(s, today) {
     const out = [];
-    for (const f of found) if (!out.includes(f.label)) out.push(f.label);
-    return { points: out, spans: found };
-  }
-
-  // 把整段文字拆成一条一条：以日期开头的行开始新的一条；没有日期就按空行分
-  function splitBlocks(text) {
-    const lines = String(text || '')
-      .replace(/\r\n?/g, '\n')
-      .split('\n');
-    const startsWithDate = (l) => {
-      const m = DATE_RE.exec(l.trim());
-      return m && m.index === 0;
-    };
-    const blocks = [];
-    if (lines.some(startsWithDate)) {
-      let cur = null;
-      for (const l of lines) {
-        if (startsWithDate(l)) {
-          cur = [l];
-          blocks.push(cur);
-        } else if (cur) cur.push(l);
-        else if (l.trim()) blocks.push((cur = [l]));
-      }
-    } else {
-      let cur = [];
-      for (const l of lines) {
-        if (l.trim()) cur.push(l);
-        else if (cur.length) {
-          blocks.push(cur);
-          cur = [];
-        }
-      }
-      if (cur.length) blocks.push(cur);
+    DATE_ANY.lastIndex = 0;
+    let m;
+    while ((m = DATE_ANY.exec(s))) {
+      const date = dateOf(m, today);
+      // 「47.5」这种不是日期：前面紧挨着数字或小数点的不算
+      if (date) out.push({ date, index: m.index, end: m.index + m[0].length });
     }
-    return blocks.map((b) => b.join('\n').trim()).filter(Boolean);
+    return out;
   }
 
-  // patients：已有患者 [{id, name}]；返回 [{date, patientId, name, points, symptoms, feeling, raw}]
-  function parseImport(text, { patients = [], today, lastDate } = {}) {
+  // 开头的「姓名，女，47：主诉」
+  function parseHeader(h, dict, names) {
+    const r = { name: '', patientId: null, gender: '', age: null, complaint: [], rest: '' };
+    let s = h.trim();
+    const known = names.find((p) => s.startsWith(p.name));
+    if (known) {
+      r.name = known.name;
+      r.patientId = known.id;
+      s = s.slice(known.name.length);
+    } else {
+      const nm = /^([一-龥·]{2,4})(?=$|[，,：:。.\s、（(])/.exec(s);
+      if (!nm) return null;
+      r.name = nm[1];
+      s = s.slice(nm[1].length);
+    }
+    const segs = s.split(/[，,：:。；;、\s]+|\.(?!\d)/).filter(Boolean);
+    let k = 0;
+    for (; k < segs.length; k++) {
+      const x = segs[k];
+      if (/^[男女]$/.test(x) && !r.gender) r.gender = x;
+      else if (/^(\d{1,3})(岁)?$/.test(x) && r.age == null) r.age = +/\d+/.exec(x)[0];
+      else if (/^(男|女)(\d{1,3})岁?$/.test(x)) {
+        r.gender = x[0];
+        r.age = +/\d+/.exec(x)[0];
+      } else if (parseSession(x, dict, {}).points.length && !REMARK.test(x.replace(/[刺血温针灸]/g, ''))) break;
+      else r.complaint.push(x);
+    }
+    // 从第一个穴位开始（没写日期的第一次）
+    if (k < segs.length) {
+      const first = segs[k];
+      r.rest = s.slice(s.indexOf(first));
+    }
+    return r;
+  }
+
+  // patients：已有患者 [{id, name}]；custom：用过的自定义穴位；groups：穴组
+  // 返回 [{date, patientId, name, gender, age, points, symptoms, feeling, raw}]，每次扎针一条
+  function parseImport(text, { patients = [], today, custom = [], groups } = {}) {
+    groups = groups || DEFAULT_GROUPS;
+    const dict = makeDict(custom, groups);
     const names = patients
       .filter((p) => p && p.name && !p.deletedAt)
       .map((p) => ({ id: p.id, name: String(p.name).trim() }))
       .filter((p) => p.name)
       .sort((a, b) => b.name.length - a.name.length);
-    let prevDate = lastDate || null;
+    const lines = String(text || '')
+      .replace(/\r\n?/g, '\n')
+      .split('\n')
+      .map((l) => l.trim())
+      .filter(Boolean);
     const items = [];
-    for (const raw of splitBlocks(text)) {
-      let rest = raw;
-      const d = findDate(rest, today);
-      let date = null;
-      if (d) {
-        date = d.date;
-        rest = rest.slice(0, d.index) + ' ' + rest.slice(d.index + d.text.length);
+    let cur = null; // 当前患者 { name, patientId, gender, age, complaint, lastPoints, lastDate }
+
+    const pushSession = (date, body, raw) => {
+      const ps = parseSession(body, dict, groups);
+      let pts = ps.points;
+      if (cur && cur.lastPoints && (ps.same || !pts.length)) {
+        const base = cur.lastPoints.slice();
+        for (const p of pts) addPoint(base, p);
+        pts = base;
       }
-      // 星期几、时间（9:30）去掉
-      rest = rest.replace(/(星期|周|礼拜)[一二三四五六日天]/g, ' ').replace(/\b\d{1,2}[:：]\d{2}\b/g, ' ');
-      // 患者：已有患者的名字出现在这一条里
-      let patientId = null;
-      let name = '';
-      for (const p of names) {
-        const i = rest.indexOf(p.name);
-        if (i >= 0) {
-          patientId = p.id;
-          name = p.name;
-          rest = rest.slice(0, i) + ' ' + rest.slice(i + p.name.length);
-          break;
+      // 「灸换到中脘」：原来灸的地方不灸了，改灸中脘（以后也照这样）
+      if (ps.moxaTo) {
+        pts = pts.filter((p) => !(/（[^）]*灸[^）]*）/.test(p) && pointBase(p.replace(/（[^）]*）/g, '')) === '神阙')).map((p) => p.replace(/（(灸|温针)）/, ''));
+        const i = pts.findIndex((p) => pointBase(p) === ps.moxaTo);
+        const mod = /温针/.test(body) ? '温针' : '灸';
+        if (i >= 0) pts[i] = `${pts[i]}（${mod}）`;
+        else pts.push(`${ps.moxaTo}（${mod}）`);
+      }
+      const keep = pts.slice();
+      // 「没灸」：这一次不灸（下次写「一样」时还按原来的）
+      if (ps.noMoxa) pts = pts.filter((p) => pointBase(p.replace(/（[^）]*）/g, '')) !== '神阙' || !/灸/.test(p)).map((p) => p.replace(/（(灸|温针)）/, ''));
+      const remarks = (list) => list.join('，');
+      const sym = ps.pre.length && ps.points.length ? remarks(ps.pre) : cur && cur.complaint ? cur.complaint : '';
+      const feel = [ps.points.length ? '' : remarks(ps.pre), remarks(ps.post), remarks(ps.feel)].filter(Boolean).join('，');
+      const it = { date: date || (cur && cur.lastDate) || null, noDate: !date, patientId: cur ? cur.patientId : null, name: cur ? cur.name : '', gender: cur ? cur.gender : '', age: cur ? cur.age : null, points: pts, symptoms: sym, feeling: feel, raw };
+      items.push(it);
+      if (cur) {
+        if (keep.length) cur.lastPoints = keep;
+        if (date) cur.lastDate = date;
+      }
+    };
+
+    for (const line of lines) {
+      const ds = allDates(line, today);
+      const startsWithDate = ds.length && ds[0].index === 0;
+      let head = startsWithDate ? '' : line.slice(0, ds.length ? ds[0].index : line.length);
+      let hdr = null;
+      if (head) {
+        hdr = parseHeader(head, dict, names);
+        // 没有日期、也不像「姓名，性别…」开头的：接在上一位患者后面
+        if (hdr && !ds.length && !hdr.gender && hdr.age == null && !hdr.rest && !hdr.patientId && !/[：:]/.test(head) && cur) hdr = null;
+        if (hdr && !hdr.patientId && !ds.length && !hdr.gender && hdr.age == null && !/[：:，,]/.test(head.slice(hdr.name.length, hdr.name.length + 1)) && cur) hdr = null;
+      }
+      if (hdr) {
+        cur = { name: hdr.name, patientId: hdr.patientId, gender: hdr.gender, age: hdr.age, complaint: hdr.complaint.join('，'), lastPoints: null, lastDate: null };
+        if (hdr.rest) pushSession(null, hdr.rest, line);
+      } else if (head && cur) {
+        // 接着上一次写的（换行了）
+        const last = items[items.length - 1];
+        const ps = parseSession(head, dict, groups);
+        if (last && last.patientId === cur.patientId && last.name === cur.name) {
+          for (const p of ps.points) addPoint(last.points, p);
+          const more = ps.pre.concat(ps.post, ps.feel).join('，');
+          if (more) last.feeling = [last.feeling, more].filter(Boolean).join('，');
+          if (ps.points.length) cur.lastPoints = last.points.slice();
         }
       }
-      // 针后感觉：「针后/扎完/感觉/反馈」后面的话
-      let feeling = '';
-      const fm = /(针后|扎后|扎完|拔针后|起针后|反馈)[:：，,\s]*([^\n]*)/.exec(rest);
-      if (fm) {
-        feeling = fm[2].trim();
-        rest = rest.slice(0, fm.index) + rest.slice(fm.index + fm[0].length);
-      }
-      const fp = findPoints(rest);
-      let sym = rest;
-      for (const sp of [...fp.spans].sort((a, b) => b.at - a.at)) sym = sym.slice(0, sp.at) + ' ' + sym.slice(sp.end);
-      sym = sym
-        .replace(/(穴位|取穴|针刺|扎针|针灸|扎|穴)[:：]?/g, ' ')
-        .replace(/[\s,，、;；。:：]+/g, ' ')
-        .trim();
-      // 没对上已有患者：开头 2~4 个汉字当作名字（导入前可以改）
-      if (!patientId) {
-        const nm = /^([一-龥]{2,4})(?=\s|$)/.exec(sym);
-        if (nm && !isKnownPoint(nm[1])) {
-          name = nm[1];
-          sym = sym.slice(nm[0].length).trim();
+      // 每个日期一次
+      for (let i = 0; i < ds.length; i++) {
+        let body = line.slice(ds[i].end, i + 1 < ds.length ? ds[i + 1].index : line.length);
+        if (startsWithDate && i === 0) {
+          // 「11月8日 张三 …」：日期后面是患者
+          const b = body.replace(/^[\s，,：:]+/, '').replace(/(星期|周|礼拜)[一二三四五六日天]/, '').replace(/^\s+/, '');
+          const known = names.find((p) => b.startsWith(p.name));
+          const nm = known ? known.name : (/^([一-龥·]{2,4})(?=[\s，,：:])/.exec(b) || [])[1];
+          if (nm && !(dict.includes(nm) || dict.some((d) => nm.startsWith(d)))) {
+            cur = { name: nm, patientId: known ? known.id : null, gender: '', age: null, complaint: '', lastPoints: cur && cur.name === nm ? cur.lastPoints : null, lastDate: null };
+            body = b.slice(nm.length);
+          }
         }
+        pushSession(ds[i].date, body, line.slice(ds[i].index, i + 1 < ds.length ? ds[i + 1].index : line.length).trim());
       }
-      if (!date) date = prevDate;
-      if (date) prevDate = date;
-      items.push({ date, patientId, name, points: fp.points, symptoms: sym, feeling, raw });
     }
     return items;
+  }
+
+  // 旧的找穴位（保留给别处用）：一段文字里所有认得的穴位
+  function findPoints(s) {
+    const ps = parseSession(s, makeDict([], DEFAULT_GROUPS), DEFAULT_GROUPS);
+    return { points: ps.points, spans: [] };
   }
 
   return {
@@ -356,6 +557,7 @@
     splitPoints,
     pointBase,
     needleCount,
+    needsRemoval,
     isKnownPoint,
     pointUsage,
     searchPoints,
@@ -366,8 +568,11 @@
     bedLayout,
     findDate,
     findPoints,
-    splitBlocks,
     parseImport,
+    groupsOf,
+    expandGroups,
+    addPoint,
+    DEFAULT_GROUPS,
     todayStr,
     uid,
   };

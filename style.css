@@ -1137,6 +1137,15 @@ body.has-tabs #fab {
   background: #fff;
   font-size: 15px;
 }
+.sugg .sg.grp {
+  border-color: #b9a6ff;
+  background: #f1ecff;
+  color: #6236ff;
+}
+.sugg .sg.grp small {
+  margin-left: 4px;
+  font-size: 11px;
+}
 .sugg .sg.raw {
   border-style: dashed;
   color: var(--text-2);
