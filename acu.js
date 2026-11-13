@@ -45,6 +45,12 @@
     }
   }
   const ALIAS = { 人中: '水沟', 外膝眼: '犊鼻' };
+  // 以前写错的穴名，自动改成对的
+  const FIX = { 间骨: '间谷' };
+  // 自定义穴位（书上没有的穴位、刺血部位…）：名称 → { py:[首字母], mod:'刺血'… }；别名 → 名称
+  let CUSTOM = new Map();
+  let CUSTOM_ALIAS = {};
+  let customKey = '';
   // 从长到短，导入时先匹配长的（「足三里」不会被认成「三里」）
   const BY_LEN = [...POINTS].sort((a, b) => b.length - a.length);
 
@@ -84,7 +90,7 @@
       .replace(/^(双侧|双|左侧|右侧|左|右|两侧)/, '')
       .replace(/(双侧|双|两侧)$/, '')
       .trim();
-    return ALIAS[s] || s;
+    return ALIAS[s] || CUSTOM_ALIAS[s] || FIX[s] || s;
   }
   // 这个写法代表几根针：标了「双」的算 2 根，其余 1 根
   // 刺血、点刺、单纯灸的不留针，拔针时不用核对（温针要拔）
@@ -97,7 +103,139 @@
   }
   // 拔针时要核对的（留着针的）
   const needsRemoval = (p) => needleCount(p) > 0;
-  const isKnownPoint = (p) => pointBase(p).split('透').every((x) => PY.has(ALIAS[x] || (x === '三里' ? '足三里' : x)));
+  const resolve = (x) => ALIAS[x] || CUSTOM_ALIAS[x] || FIX[x] || (x === '三里' ? '足三里' : x);
+  const isKnownPoint = (p) =>
+    pointBase(p)
+      .split('透')
+      .every((x) => PY.has(resolve(x)) || CUSTOM.has(resolve(x)));
+  const isCustomPoint = (p) => {
+    const b = pointBase(p);
+    return !PY.has(b) && CUSTOM.has(b);
+  };
+
+  // ---------- 自定义穴位 ----------
+  // 存在 settings.acu.custom：[{ name:'仙骨', alias:['仙骨穴'], mod:'', py:'xg' }]
+  //   mod：默认刺法，如「刺血」（选它时自动写成「脚刺痛处（刺血）」，拔针时不用核对）
+  //   py：拼音首字母，电脑上自动算（手机上新加的，下次电脑打开时补上）
+  const cleanName = (n) =>
+    String(n || '')
+      .replace(/[（(][^)）]*[)）]/g, '')
+      .replace(/[\s,，、;；。.\/|+＋=＝:：]/g, '')
+      .trim();
+  function normCustom(arr) {
+    const out = [];
+    const seen = new Set();
+    for (const x of Array.isArray(arr) ? arr : []) {
+      const o = typeof x === 'string' ? { name: x } : x || {};
+      const name = cleanName(o.name);
+      if (!name || seen.has(name) || PY.has(name) || ALIAS[name]) continue;
+      seen.add(name);
+      const alias = [...new Set((Array.isArray(o.alias) ? o.alias : []).map(cleanName))].filter((a) => a && a !== name && !PY.has(a) && !ALIAS[a]);
+      out.push({ name, alias, mod: String(o.mod || '').trim(), py: String(o.py || '').toLowerCase().replace(/[^a-z,]/g, '') });
+    }
+    return out;
+  }
+  const hasCustom = (settings) => !!(settings && settings.acu && Array.isArray(settings.acu.custom));
+  const customOf = (settings) => normCustom(hasCustom(settings) ? settings.acu.custom : []);
+  // 用设置里的自定义穴位（显示、补全、导入都按这个认）。没设置过时，用记录里用过的
+  function setCustom(settings, acuList) {
+    const list = hasCustom(settings) ? customOf(settings) : initialCustom(acuList);
+    const key = JSON.stringify(list);
+    if (key === customKey) return list;
+    customKey = key;
+    CUSTOM = new Map();
+    CUSTOM_ALIAS = {};
+    for (const c of list) {
+      CUSTOM.set(c.name, { py: c.py ? c.py.split(',') : [], mod: c.mod, alias: c.alias });
+      for (const a of c.alias) if (!CUSTOM.has(a)) CUSTOM_ALIAS[a] = c.name;
+    }
+    return list;
+  }
+  // 第一次：把记录里用过的、书上没有的穴位都列进自定义穴位（间骨 → 间谷 的别名）
+  function initialCustom(acuList) {
+    const m = new Map();
+    for (const a of acuList || []) {
+      if (a.deletedAt) continue;
+      for (const p of a.points || []) {
+        for (let x of pointBase(p).split('透')) {
+          x = FIX[x] || x;
+          if (!x || PY.has(resolve(x))) continue;
+          m.set(x, (m.get(x) || 0) + 1);
+        }
+      }
+    }
+    const list = [...m.keys()].sort((a, b) => m.get(b) - m.get(a)).map((name) => ({ name, alias: [], mod: '', py: '' }));
+    for (const [wrong, right] of Object.entries(FIX)) {
+      const c = list.find((x) => x.name === right);
+      if (c && !c.alias.includes(wrong)) c.alias.push(wrong);
+    }
+    return normCustom(list);
+  }
+  // 一行一个：「仙骨」「间谷=间骨」「脚刺痛处（刺血）」「疏肝=疏肝穴、疏肝点」
+  function parseCustomText(text, old) {
+    const prev = new Map(normCustom(old).map((c) => [c.name, c]));
+    const out = [];
+    for (const line of String(text || '').split(/\n/)) {
+      if (!line.trim()) continue;
+      const mm = /[（(]\s*([^)）]+?)\s*[)）]/.exec(line);
+      const rest = line.replace(/[（(][^)）]*[)）]/g, '');
+      const [l, r] = rest.split(/[=＝]/);
+      const name = cleanName(l);
+      if (!name) continue;
+      const alias = splitPoints(r || '').map(cleanName).filter(Boolean);
+      out.push({ name, alias, mod: mm ? mm[1] : '', py: name === (prev.get(name) || {}).name ? prev.get(name).py : '' });
+    }
+    return normCustom(out);
+  }
+  const customText = (list) => normCustom(list).map((c) => c.name + (c.mod ? `（${c.mod}）` : '') + (c.alias.length ? '=' + c.alias.join('、') : '')).join('\n');
+  // 从补全里选了一个穴位：自定义穴位有默认刺法的，带上
+  const pickLabel = (name) => {
+    const c = CUSTOM.get(name);
+    return c && c.mod ? `${name}（${c.mod}）` : name;
+  };
+  // 把写错的 / 别名换成正式的名字（左右双、括号里的说明都保留）
+  function canonPoint(p) {
+    const s = String(p || '');
+    const m = /^(双侧|双|左侧|右侧|左|右|两侧)?([^（(]*)([\s\S]*)$/.exec(s);
+    const tail = /(双侧|双|两侧)$/.exec(m[2]);
+    const core = tail ? m[2].slice(0, -tail[0].length) : m[2];
+    const fixed = core
+      .split('透')
+      .map((x) => FIX[x.trim()] || CUSTOM_ALIAS[x.trim()] || x)
+      .join('透');
+    return (m[1] || '') + fixed + (tail ? tail[0] : '') + m[3];
+  }
+  // 拆开 / 拼回一个穴位的写法：「右仙骨（刺血，胃）」⇄ { side:'右', name:'仙骨', tags:['刺血','胃'] }
+  function partsOf(p) {
+    let s = String(p || '').trim();
+    const tags = [];
+    let side = '';
+    s = s.replace(/[（(]([^)）]*)[)）]/g, (_, t) => {
+      for (const x of t.split(/[，,、]/).map((y) => y.trim()).filter(Boolean)) {
+        if (/^(双|双侧|两侧)$/.test(x)) side = '双';
+        else if (/^(左|左侧)$/.test(x)) side = '左';
+        else if (/^(右|右侧)$/.test(x)) side = '右';
+        else tags.push(x);
+      }
+      return '';
+    });
+    const pre = /^(双侧|两侧|双|左侧|右侧|左|右)/.exec(s);
+    if (pre) {
+      side = pre[1][0] === '两' ? '双' : pre[1][0];
+      s = s.slice(pre[0].length);
+    }
+    const post = /(双侧|两侧|双)$/.exec(s);
+    if (post) {
+      side = '双';
+      s = s.slice(0, -post[0].length);
+    }
+    return { side, name: s.trim(), tags };
+  }
+  function buildLabel({ side, name, tags }) {
+    const t = tags || [];
+    const l = (side || '') + name;
+    return t.length ? `${l}（${t.join('，')}）` : l;
+  }
 
   // 统计用过的穴位次数（用得多的排在补全前面）
   function pointUsage(acuList) {
@@ -119,15 +257,18 @@
     if (!q) return [];
     // 穴组（老十针…）排最前
     const gs = groups ? Object.keys(groups).filter((g) => g.startsWith(q) || g.includes(q) || (GROUP_PY[g] || '').startsWith(q)) : [];
-    const extra = usage ? [...usage.keys()].filter((k) => !PY.has(k)) : [];
+    const cust = [...CUSTOM.keys()].filter((k) => !PY.has(k));
+    const extra = usage ? [...usage.keys()].filter((k) => !PY.has(k) && !CUSTOM.has(k) && !CUSTOM_ALIAS[k] && !FIX[k]) : [];
     const res = [];
-    for (const name of POINTS.concat(extra)) {
+    for (const name of POINTS.concat(cust, extra)) {
       let score = -1;
-      const inis = PY.get(name) || [];
+      const c = CUSTOM.get(name);
+      const inis = PY.get(name) || (c && c.py) || [];
       if (name === q) score = 100;
       else if (name.startsWith(q)) score = 80;
       else if (inis.some((i) => i === q)) score = 70;
       else if (inis.some((i) => i.startsWith(q))) score = 60;
+      else if (c && c.alias.some((a) => a.startsWith(q))) score = 55;
       else if (name.includes(q)) score = 40;
       if (score < 0) continue;
       score += Math.min(30, (usage && usage.get(name)) || 0);
@@ -251,7 +392,7 @@
   const ALIAS2 = Object.assign({ 三里: '足三里', 大棱: '大陵', 仙骨穴: '仙骨' }, ALIAS);
   // 书上没有、但常写的穴位 / 部位 / 董氏奇穴（导入时当作穴位）。用过的自定义穴位也会自动加进来
   const SEED_CUSTOM = [
-    '仙骨', '足三重', '侧头', '火土', '间谷', '间骨', '疏肝', '咽痛点', '四指尖', '灵骨', '大白', '中白', '下白', '腕顺', '重子', '重仙', '叉三', '三叉一', '三叉二', '三叉三',
+    '仙骨', '足三重', '侧头', '火土', '间谷', '疏肝', '咽痛点', '四指尖', '灵骨', '大白', '中白', '下白', '腕顺', '重子', '重仙', '叉三', '三叉一', '三叉二', '三叉三',
     '门金', '木穴', '正筋', '正宗', '三重', '驷马', '制污', '妇科', '还巢', '龙眼', '暖宫', '护宫', '子门', '子户', '中指', '小指', '中指小指', '耳尖', '肘窝',
     '八髎', '肩', '颈', '背', '脖子', '肩颈', '肩膀', '肩周', '颈背', '颈肩', '颈肩臂', '肩颈背', '脖子头', '脖子肩', '后脑勺', '屁股', '三角肌', '胳膊', '压痛点',
     '血海上压痛点', '血海上面压痛点', '合谷下面',
@@ -269,10 +410,10 @@
   const DATE_ANY = /(?:(20\d{2})\s*[年.\-\/]\s*)?(?<!\d)(\d{1,2})\s*(?:[月.\-\/])\s*(\d{1,2})(?!\d)\s*[日号]?/g;
 
   function makeDict(custom, groups) {
-    const names = new Set(POINTS.concat(Object.keys(ALIAS2), SEED_CUSTOM, custom || [], Object.keys(groups || {})));
+    const names = new Set(POINTS.concat(Object.keys(ALIAS2), Object.keys(FIX), SEED_CUSTOM, [...CUSTOM.keys()], Object.keys(CUSTOM_ALIAS), custom || [], Object.keys(groups || {})));
     return [...names].filter(Boolean).sort((a, b) => b.length - a.length);
   }
-  const canon = (n) => ALIAS2[n] || n;
+  const canon = (n) => FIX[n] || CUSTOM_ALIAS[n] || ALIAS2[n] || n;
   const normMod = (m) => MOD_NORM[m] || m;
 
   // 把「双手 / 左手 / 两只手」这种写法统一成「双 / 左 / 右」
@@ -724,6 +865,16 @@
     needleCount,
     needsRemoval,
     isKnownPoint,
+    isCustomPoint,
+    customOf,
+    setCustom,
+    initialCustom,
+    parseCustomText,
+    customText,
+    pickLabel,
+    canonPoint,
+    partsOf,
+    buildLabel,
     pointUsage,
     searchPoints,
     isActive,

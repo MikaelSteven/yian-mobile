@@ -1251,3 +1251,7 @@ body.has-tabs #fab {
   margin: 4px 0 0;
   font: inherit;
 }
+.sugg .sg.cus {
+  border-color: #9fd9c9;
+  background: #effaf6;
+}

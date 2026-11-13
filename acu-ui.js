@@ -26,6 +26,8 @@ window.AcuUIFactory = function (api) {
   const ptsLine = (pts) => (pts || []).join('、');
   const groups = () => Acu.groupsOf(S.db.settings);
   const customPoints = () => [...Acu.pointUsage(S.db.acu).keys()].filter((k) => !Acu.isKnownPoint(k));
+  // 让 Acu 按设置里的自定义穴位来认（补全、标色、导入）
+  const useCustom = () => Acu.setCustom(S.db.settings, S.db.acu);
 
   // ============================================================
   // 闹钟
@@ -287,6 +289,7 @@ window.AcuUIFactory = function (api) {
   // 穴位输入（小方块 + 补全）
   // ============================================================
   function ptsEditorHtml(points) {
+    useCustom();
     return `<div class="pts" id="pts">${(points || []).map((p, i) => `<button type="button" class="pt${Acu.isKnownPoint(p) ? '' : ' unk'}" data-act="acu-pt" data-i="${i}">${esc(p)}</button>`).join('')}<input id="ptIn" type="text" placeholder="${(points || []).length ? '继续加穴位…' : '穴位：名称或拼音首字母（zsl＝足三里）'}" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="done" /></div>
       <div class="sugg" id="ptSug"></div>`;
   }
@@ -309,7 +312,7 @@ window.AcuUIFactory = function (api) {
       showSug();
     };
     const add = (txt) => {
-      for (const p of Acu.expandGroups(Acu.splitPoints(txt), groups())) Acu.addPoint(d.points, p);
+      for (const p of Acu.expandGroups(Acu.splitPoints(txt), groups())) Acu.addPoint(d.points, Acu.canonPoint(p));
       inp.value = '';
       onChange();
       redraw();
@@ -327,7 +330,7 @@ window.AcuUIFactory = function (api) {
       }
       names = names.filter((n) => !d.points.some((p) => Acu.pointBase(p) === n));
       const gs = groups();
-      s.innerHTML = names.map((n) => (gs[n] ? `<button type="button" class="sg grp" data-name="${esc(n)}" title="${esc(gs[n].join('、'))}">${esc(n)}<small>${gs[n].length}穴</small></button>` : `<button type="button" class="sg" data-name="${esc((side ? side[1] : '') + n)}">${esc((side ? side[1] : '') + n)}</button>`)).join('') + (q && /[\u4e00-\u9fa5]/.test(q) && !names.includes(q) ? `<button type="button" class="sg raw" data-name="${esc(raw)}">加「${esc(raw)}」</button>` : '');
+      s.innerHTML = names.map((n) => (gs[n] ? `<button type="button" class="sg grp" data-name="${esc(n)}" title="${esc(gs[n].join('、'))}">${esc(n)}<small>${gs[n].length}穴</small></button>` : `<button type="button" class="sg${Acu.isCustomPoint(n) ? ' cus' : ''}" data-name="${esc((side ? side[1] : '') + Acu.pickLabel(n))}">${esc((side ? side[1] : '') + Acu.pickLabel(n))}</button>`)).join('') + (q && /[\u4e00-\u9fa5]/.test(q) && !names.includes(q) ? `<button type="button" class="sg raw" data-name="${esc(raw)}">加「${esc(raw)}」</button>` : '');
     }
     $('#ptIn').addEventListener('input', (e) => {
       const v = e.target.value;
@@ -358,10 +361,21 @@ window.AcuUIFactory = function (api) {
       if (!b) return $('#ptIn').focus();
       const i = Number(b.dataset.i);
       const p = d.points[i];
-      const base = Acu.pointBase(p);
+      const pr = Acu.partsOf(p);
+      const has = (m) => pr.tags.includes(m);
+      const unknown = pr.name.split('透').filter((x) => x && !Acu.isKnownPoint(x));
       const v = await sheet({
         title: p,
-        body: `<div class="chips">${['双', '左', '右', ''].map((s) => `<button type="button" class="lbtn" data-pick="${s}">${s ? s + base : '只写' + base}</button>`).join('')}</div>
+        body: `<div class="chips">${[
+          ['双', '双'],
+          ['左', '左'],
+          ['右', '右'],
+          ['', '不分左右'],
+        ]
+          .map(([x, t]) => `<button type="button" class="lbtn${pr.side === x ? ' on' : ''}" data-pick="side:${x}">${t}</button>`)
+          .join('')}</div>
+          <div class="chips" style="margin-top:10px">${['刺血', '灸', '温针'].map((m) => `<button type="button" class="lbtn${has(m) ? ' on' : ''}" data-pick="mod:${m}">${m}</button>`).join('')}</div>
+          ${unknown.length ? `<div class="chips" style="margin-top:10px"><button type="button" class="lbtn" data-pick="cust">把「${esc(unknown.join('、'))}」存为自定义穴位</button></div>` : ''}
           <div class="chips" style="margin-top:14px"><button type="button" class="lbtn red" data-pick="del">去掉这个穴位</button></div>`,
         buttons: [{ text: '取消', value: null }],
         onOpen: (bx, done) =>
@@ -372,7 +386,17 @@ window.AcuUIFactory = function (api) {
       });
       if (v == null) return;
       if (v === 'del') d.points.splice(i, 1);
-      else d.points[i] = v + base;
+      else if (v === 'cust') {
+        const cur = useCustom();
+        const add = unknown.filter((n) => !cur.some((c) => c.name === n)).map((name) => ({ name, alias: [], mod: '', py: '' }));
+        if ((await saveCustom(cur.concat(add))) >= 0) toast('已存为自定义穴位');
+        d.points = d.points.map(Acu.canonPoint);
+      } else {
+        const [k, val] = v.split(':');
+        if (k === 'side') pr.side = val;
+        else pr.tags = has(val) ? pr.tags.filter((t) => t !== val) : pr.tags.concat(val);
+        d.points[i] = Acu.buildLabel(pr);
+      }
       onChange();
       redraw();
     };
@@ -472,7 +496,8 @@ window.AcuUIFactory = function (api) {
     if (v('aSym') !== undefined) d.symptoms = v('aSym').trim();
     if (v('aFeel') !== undefined) d.feeling = v('aFeel').trim();
     const pending = v('ptIn');
-    if (pending && pending.trim()) for (const p of Acu.expandGroups(Acu.splitPoints(pending), groups())) Acu.addPoint(d.points, p);
+    if (pending && pending.trim()) for (const p of Acu.expandGroups(Acu.splitPoints(pending), groups())) Acu.addPoint(d.points, Acu.canonPoint(p));
+    d.points = (d.points || []).map(Acu.canonPoint);
     if (v('aDate') !== undefined && v('aDate')) d.date = v('aDate');
     if (v('aBed') !== undefined) d.bed = Number(v('aBed')) || null;
     const setTime = (key, val) => {
@@ -742,6 +767,7 @@ window.AcuUIFactory = function (api) {
     const st = S.acuImp;
     const t = ($('#impText') || {}).value || st.text;
     st.text = t;
+    useCustom();
     const items = Acu.parseImport(t, { patients: patientsActive(), today: Acu.todayStr(), custom: customPoints(), groups: groups() });
     if (!items.length) return toast('没有识别出内容', 'warn');
     const have = new Set(acuList().map((a) => a.patientId + '|' + a.date + '|' + (a.points || []).map(Acu.pointBase).sort().join(',')));
@@ -808,6 +834,8 @@ window.AcuUIFactory = function (api) {
       <div class="kv"><b>闹钟</b><span id="permBox">检查中…</span></div>
       <label class="field" style="margin-top:8px"><span>穴组（一行一个：名称：穴位、穴位…）</span><textarea id="grpText" rows="3" style="width:100%;padding:8px;border:1px solid var(--line-2);border-radius:8px;font-size:15px">${esc(groupsText())}</textarea></label>
       <button class="btn block" data-act="acu-groups">保存穴组</button>
+      <label class="field" style="margin-top:8px"><span>自定义穴位（书上没有的穴位、常刺血的部位，一行一个。别名：间谷=间骨；平时刺血的：脚刺痛处（刺血））</span><textarea id="custText" rows="4" style="width:100%;padding:8px;border:1px solid var(--line-2);border-radius:8px;font-size:15px">${esc(Acu.customText(useCustom()))}</textarea></label>
+      <button class="btn block" data-act="acu-custom">保存自定义穴位</button>
       <div class="two"><button class="btn" data-act="acu-test" data-k="manip">试听行针铃</button><button class="btn" data-act="acu-test" data-k="remove">试听拔针铃</button></div>
       <p class="hint">床位排布：右上 1、右下 2、左上 3、左下 4，加的床位继续往左排。改了留针时长只影响之后开始的人。</p>
     </div>`;
@@ -834,6 +862,37 @@ window.AcuUIFactory = function (api) {
       db.settings.acu = Object.assign({}, db.settings.acu, { groups: out });
     });
     if (ok) toast('穴组已保存');
+  }
+
+  // 存好自定义穴位，并把所有记录里的别名 / 写错的名字换成正式名称。返回改了几条记录（失败 -1）
+  // 拼音首字母在电脑上补（手机上没有拼音库），补好后同步回来
+  async function saveCustom(list) {
+    let n = 0;
+    const ok = await commit((db) => {
+      db.settings = db.settings || {};
+      db.settings.acu = Object.assign({}, db.settings.acu, { custom: list });
+      Acu.setCustom(db.settings, db.acu);
+      const now = new Date().toISOString();
+      for (const a of db.acu || []) {
+        if (a.deletedAt || !Array.isArray(a.points)) continue;
+        const pts = a.points.map(Acu.canonPoint);
+        if (pts.join('|') !== a.points.join('|')) {
+          a.points = pts;
+          a.updatedAt = now;
+          n++;
+        }
+      }
+    });
+    useCustom();
+    return ok ? n : -1;
+  }
+  async function saveCustomText() {
+    const cur = useCustom();
+    const n = await saveCustom(Acu.parseCustomText(($('#custText') || {}).value || '', cur));
+    if (n < 0) return;
+    toast(n ? `已保存，${n} 条记录里的别名改成了正式名称` : '自定义穴位已保存');
+    const t = $('#custText');
+    if (t) t.value = Acu.customText(useCustom());
   }
 
   async function fillPerm() {
@@ -981,6 +1040,7 @@ window.AcuUIFactory = function (api) {
       fillPerm();
     },
     'acu-groups': () => saveGroups(),
+    'acu-custom': () => saveCustomText(),
     'acu-perm': async () => {
       await askPerms();
       fillPerm();
