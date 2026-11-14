@@ -1,7 +1,11 @@
 :root {
   --primary: #027fff;
-  --primary-soft: #eaf4ff;
-  --primary-line: #a9d1ff;
+  /* 主色在「设置 → 外观」里选（theme.js 改 --primary），深浅自动算 */
+  --primary-soft: color-mix(in srgb, var(--primary) 9%, var(--card));
+  --primary-line: color-mix(in srgb, var(--primary) 38%, var(--card));
+  --fill: #f2f4f7;
+  --red-line: #f0b4b6;
+  --placeholder: #c4cbd5;
   --bg: #f2f4f7;
   --card: #fff;
   --line: #e4e7eb;
@@ -56,7 +60,7 @@ button {
   gap: 6px;
   min-height: calc(52px + var(--safe-t));
   padding: var(--safe-t) 8px 0;
-  background: #fff;
+  background: var(--card);
   border-bottom: 1px solid var(--line);
 }
 .bar .ttl {
@@ -116,7 +120,7 @@ button {
   padding: 0 10px;
   border: 1px solid var(--line);
   border-radius: 15px;
-  background: #fff;
+  background: var(--card);
   font-size: 12.5px;
   color: var(--text-2);
 }
@@ -124,7 +128,7 @@ button {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #9aa5b1;
+  background: var(--muted);
 }
 .chip-sync.ok i {
   background: var(--green);
@@ -138,7 +142,7 @@ button {
 }
 .chip-sync.error {
   color: var(--red);
-  border-color: #f0b4b6;
+  border-color: var(--red-line);
 }
 .chip-sync.error i {
   background: var(--red);
@@ -170,7 +174,7 @@ main {
   padding: 0 14px 0 40px;
   border: 1px solid var(--line);
   border-radius: 21px;
-  background: #fff url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 24 24' fill='none' stroke='%238a919c' stroke-width='2' stroke-linecap='round'><circle cx='11' cy='11' r='7'/><path d='M20 20l-4-4'/></svg>") no-repeat 13px center;
+  background: var(--card) url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 24 24' fill='none' stroke='%238a919c' stroke-width='2' stroke-linecap='round'><circle cx='11' cy='11' r='7'/><path d='M20 20l-4-4'/></svg>") no-repeat 13px center;
   outline: none;
   font-size: 16px;
 }
@@ -187,7 +191,7 @@ main {
   padding: 0 13px;
   border: 1px solid var(--line-2);
   border-radius: 15px;
-  background: #fff;
+  background: var(--card);
   font-size: 14px;
   color: var(--text-2);
 }
@@ -234,7 +238,7 @@ main {
   display: grid;
   place-items: center;
   border-radius: 50%;
-  background: #c4cbd5;
+  background: var(--placeholder);
   color: #fff;
   font-size: 17px;
   font-weight: 600;
@@ -355,7 +359,7 @@ main {
   padding: 9px 12px;
   border: 1px solid var(--line-2);
   border-radius: 8px;
-  background: #fff;
+  background: var(--card);
   outline: none;
   font-size: 16px;
 }
@@ -434,7 +438,7 @@ main {
   font-size: 14px;
 }
 .lbtn.red {
-  border-color: #f0b4b6;
+  border-color: var(--red-line);
   background: var(--red-bg);
   color: var(--red);
 }
@@ -454,7 +458,7 @@ main {
   height: 36px;
   border: 1px solid var(--line-2);
   border-radius: 8px;
-  background: #fff;
+  background: var(--card);
   overflow: hidden;
   font-size: clamp(11px, 3.6vw, 14px);
 }
@@ -623,7 +627,7 @@ main {
   color: #fff;
   font-size: 16px;
   font-weight: 600;
-  box-shadow: 0 6px 18px rgba(2, 127, 255, 0.35);
+  box-shadow: 0 6px 18px color-mix(in srgb, var(--primary) 35%, transparent);
 }
 .fab:active {
   filter: brightness(0.92);
@@ -637,7 +641,7 @@ main {
   display: flex;
   gap: 10px;
   padding: 10px 12px calc(10px + var(--safe-b));
-  background: #fff;
+  background: var(--card);
   border-top: 1px solid var(--line);
 }
 .savebar button {
@@ -669,7 +673,7 @@ main {
   padding: 0 18px;
   border: 1px solid var(--line-2);
   border-radius: 10px;
-  background: #fff;
+  background: var(--card);
   font-size: 16px;
 }
 .btn.primary {
@@ -679,7 +683,7 @@ main {
   font-weight: 600;
 }
 .btn.danger {
-  border-color: #f0b4b6;
+  border-color: var(--red-line);
   color: var(--red);
 }
 .btn.block {
@@ -705,7 +709,7 @@ main {
   overflow: auto;
   padding: 16px 16px calc(16px + var(--safe-b));
   border-radius: 16px 16px 0 0;
-  background: #fff;
+  background: var(--card);
 }
 .sheet h2 {
   margin: 0 0 8px;
@@ -756,7 +760,7 @@ main {
   margin-top: 14px;
   padding: 10px 14px;
   border-radius: 10px;
-  background: #fff;
+  background: var(--card);
 }
 .setup summary {
   font-weight: 600;
@@ -818,7 +822,7 @@ main {
   z-index: 14;
   display: flex;
   padding-bottom: var(--safe-b);
-  background: #fff;
+  background: var(--card);
   border-top: 1px solid var(--line);
 }
 .tabs button {
@@ -885,7 +889,7 @@ body.has-tabs #fab {
   padding: 10px 10px 8px;
   border-radius: 14px;
   border: 1px solid var(--line);
-  background: #fff;
+  background: var(--card);
   text-align: left;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
 }
@@ -917,11 +921,11 @@ body.has-tabs #fab {
 }
 .bed.on {
   border-color: var(--primary-line);
-  background: linear-gradient(#fff, #f6faff);
+  background: linear-gradient(var(--card), var(--primary-soft));
 }
 .bed.due {
   border-color: var(--red);
-  background: linear-gradient(#fff, #fff1f1);
+  background: linear-gradient(var(--card), var(--red-bg));
   animation: duePulse 1.6s ease-in-out infinite;
 }
 @keyframes duePulse {
@@ -1003,7 +1007,7 @@ body.has-tabs #fab {
   font-weight: 600;
 }
 .bed .mini.red {
-  border-color: #f0b4b6;
+  border-color: var(--red-line);
   background: var(--red-bg);
   color: var(--red);
 }
@@ -1134,13 +1138,13 @@ body.has-tabs #fab {
   padding: 0 11px;
   border: 1px solid var(--line-2);
   border-radius: 16px;
-  background: #fff;
+  background: var(--card);
   font-size: 15px;
 }
 .sugg .sg.grp {
-  border-color: #b9a6ff;
-  background: #f1ecff;
-  color: #6236ff;
+  border-color: var(--primary-line);
+  background: var(--primary-soft);
+  color: var(--primary);
 }
 .sugg .sg.grp small {
   margin-left: 4px;
@@ -1177,7 +1181,7 @@ body.has-tabs #fab {
   padding: 4px;
   border: 2px solid var(--line-2);
   border-radius: 10px;
-  background: #fff;
+  background: var(--card);
   font-size: 16px;
   font-weight: 600;
   line-height: 1.2;
@@ -1252,6 +1256,83 @@ body.has-tabs #fab {
   font: inherit;
 }
 .sugg .sg.cus {
-  border-color: #9fd9c9;
-  background: #effaf6;
+  border-color: color-mix(in srgb, var(--green) 40%, var(--card));
+  background: var(--green-bg);
+}
+
+/* ============================================================
+   暗色模式（设置 → 外观）
+   ============================================================ */
+html[data-theme='dark'] {
+  color-scheme: dark;
+  --bg: #141619;
+  --card: #1d2024;
+  --line: #2c3036;
+  --line-2: #3a3f46;
+  --text: #e2e5e9;
+  --text-2: #b1b8c2;
+  --muted: #868e9a;
+  --placeholder: #5b626d;
+  --fill: #2a2e34;
+  --primary-soft: color-mix(in srgb, var(--primary) 17%, var(--card));
+  --primary-line: color-mix(in srgb, var(--primary) 48%, var(--card));
+  --red: #f06a6e;
+  --red-bg: #3a1f22;
+  --red-line: #6b3236;
+  --green: #3fbf7f;
+  --green-bg: #17352a;
+  --orange: #f0a43a;
+  --orange-bg: #3a2b15;
+}
+html[data-theme='dark'] input,
+html[data-theme='dark'] textarea,
+html[data-theme='dark'] select {
+  background-color: var(--card);
+  color: var(--text);
+}
+/* 设置 → 外观 */
+.theme-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 6px 0 10px;
+}
+.theme-row .lbtn {
+  color: var(--text-2);
+  border-color: var(--line-2);
+  background: var(--card);
+}
+.theme-row .lbtn.on {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: #fff;
+}
+html[data-theme='dark'] a {
+  color: var(--primary);
+}
+.swatch {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  width: 52px;
+  padding: 6px 0;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: none;
+  color: var(--text-2);
+  font-size: 13px;
+}
+.swatch i {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+}
+.swatch.on {
+  border-color: var(--line-2);
+  color: var(--text);
+  font-weight: 600;
+}
+.swatch.on i {
+  box-shadow: 0 0 0 2px var(--card), 0 0 0 4px currentColor;
 }

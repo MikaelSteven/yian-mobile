@@ -4,7 +4,7 @@
 // ============================================================
 (function () {
   'use strict';
-  const VERSION = '0.6.2';
+  const VERSION = '0.6.3';
   const $ = (s, r = document) => r.querySelector(s);
   const $$ = (s, r = document) => [...r.querySelectorAll(s)];
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -840,6 +840,18 @@
     return `<span style="color:${y.state === 'error' ? 'var(--red)' : y.state === 'ok' ? 'var(--green)' : 'var(--muted)'}">${esc(t)}</span>`;
   }
 
+  // 外观：亮色 / 暗色、主色（只存在这部手机上，和电脑分开设）
+  function lookHtml() {
+    const T = window.YianTheme;
+    const t = T.get();
+    const dark = T.isDark();
+    return `<div class="theme-row">${Object.entries(T.MODES)
+      .map(([k, v]) => `<button type="button" class="lbtn${t.mode === k ? ' on' : ''}" data-act="look" data-mode="${k}">${v}</button>`)
+      .join('')}</div>
+      <div class="theme-row">${Object.entries(T.ACCENTS)
+        .map(([k, v]) => `<button type="button" class="swatch${t.accent === k ? ' on' : ''}" data-act="look" data-accent="${k}"><i style="background:${dark ? v[2] : v[1]}"></i>${v[0]}</button>`)
+        .join('')}</div>`;
+  }
   function viewSettings() {
     S.view = 'settings';
     const c = S.cfg || {};
@@ -859,6 +871,7 @@
           <div class="kv"><b>医案</b><span>${nV} 条</span></div>
           <p class="hint">手机版只同步文字，不含照片；照片请在电脑上查看。</p>
         </div>
+        <div class="card" id="lookCard"><h3>外观</h3>${lookHtml()}</div>
         ${Acu_ui ? Acu_ui.settingsCardHtml() : ''}
         <div class="card"><h3>其他</h3>
           <button class="btn block" data-act="install-help">添加到手机桌面</button>
@@ -998,6 +1011,14 @@
 
   // ---------------- 事件 ----------------
   const acts = {
+    look: (el) => {
+      const t = window.YianTheme.get();
+      if (el.dataset.mode) t.mode = el.dataset.mode;
+      if (el.dataset.accent) t.accent = el.dataset.accent;
+      window.YianTheme.set(t);
+      const c = $('#lookCard');
+      if (c) c.innerHTML = '<h3>外观</h3>' + lookHtml();
+    },
     back: () => back(S.view === 'visit' && S.draft ? '/p/' + encodeURIComponent(S.draft.patientId) : S.view === 'pedit' && S.pdraft && S.pdraft.id ? '/p/' + encodeURIComponent(S.pdraft.id) : '/'),
     settings: () => go('/set'),
     syncnow: async () => {
