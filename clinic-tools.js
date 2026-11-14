@@ -99,8 +99,9 @@ window.ClinicTools = function (api) {
   function viewCompare(pid, vid) {
     if (!pid) return choosePatient('compare', 2);
     const p = getPatient(pid);
-    const visits = p ? visitsOf(pid) : [];
-    if (visits.length < 2) return show('compare', empty('至少需要两次就诊记录'));
+    if (!p) return show('compare', empty('没有找到患者'));
+    const visits = visitsOf(pid);
+    if (visits.length < 2) return show('compare', `<div class="card"><h3>${esc(p.name)}</h3><p class="hint">已有 ${visits.length} 次就诊记录，再记录 ${2 - visits.length} 次即可对比。</p></div>`);
     const selected = visits.find((v) => v.id === vid) || visits.at(-1);
     const first = visits[visits.indexOf(selected) - 1] || visits[1];
     show('compare', `<div class="card"><h3>${esc(p.name)}</h3>

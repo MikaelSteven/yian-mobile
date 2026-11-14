@@ -4,7 +4,7 @@
 // ============================================================
 (function () {
   'use strict';
-  const VERSION = '0.6.6';
+  const VERSION = '0.6.7';
   const $ = (s, r = document) => r.querySelector(s);
   const $$ = (s, r = document) => [...r.querySelectorAll(s)];
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -464,7 +464,7 @@
             ? `<div class="card"><h3>档案</h3>${phone ? `<div class="kv"><b>电话</b><span><a href="tel:${esc(phone)}">${esc(phone)}</a></span></div>` : ''}${kv('过敏', p.allergy)}${kv('既往史', p.history)}${kv('备注', p.note)}${(p.tags || []).length ? `<div class="kv"><b>标签</b><span>${p.tags.map((t) => `<span class="tag">${esc(t)}</span>`).join(' ')}</span></div>` : ''}</div>`
             : ''
         }
-        <div class="count">就诊记录（${vs.length} 次） ${vs.length > 1 ? `<button class="lbtn" data-act="compare" data-pid="${esc(id)}">处方对比</button>` : ''}</div>
+        <div class="count">就诊记录（${vs.length} 次） <button type="button" class="lbtn" data-act="compare" data-pid="${esc(id)}">处方对比</button></div>
         ${
           vs.length
             ? `<div class="list">${vs
