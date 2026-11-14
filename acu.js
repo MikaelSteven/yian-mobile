@@ -321,7 +321,8 @@
     const elapsed = Math.max(0, (now - t0) / 60000);
     const removeAt = t0 + dur * 60000;
     const al = alarmsOf(a, cfg).filter((x) => x.kind === 'manip');
-    const next = al.find((x) => x.at > now) || null;
+    const manipDone = (a.manip || []).length;
+    const next = al.find((x) => x.n > manipDone && x.at > now) || null;
     const lastDue = [...al].reverse().find((x) => x.at <= now) || null;
     return {
       elapsed,
@@ -331,7 +332,7 @@
       nextManip: next,
       lastDue, // 最近一次已经到点的行针（第几次）
       plannedManip: al.length,
-      manipDone: (a.manip || []).length,
+      manipDone,
       progress: Math.min(1, elapsed / dur),
       interval: iv,
       duration: dur,

@@ -40,18 +40,6 @@ window.AcuUIFactory = function (api) {
   })();
   const isApp = () => !!Native.LN;
 
-  let channelsReady = false;
-  async function ensureChannels() {
-    if (!isApp() || channelsReady) return;
-    try {
-      await Native.LN.createChannel({ id: 'acu-manip2', name: '行针提醒', description: '留针期间每隔一段时间提醒行针', importance: 5, visibility: 1, sound: 'manip.wav', vibration: true, lights: true });
-      await Native.LN.createChannel({ id: 'acu-remove2', name: '拔针提醒', description: '留针时间到了，提醒拔针', importance: 5, visibility: 1, sound: 'remove.wav', vibration: true, lights: true });
-      channelsReady = true;
-    } catch (e) {
-      /* 旧系统没有渠道，忽略 */
-    }
-  }
-
   // 权限：通知 + 精确闹钟（安卓 12 以后要单独允许，不然锁屏时可能晚响）
   async function permState() {
     if (!isApp()) return { app: false, notify: typeof Notification !== 'undefined' ? Notification.permission : 'unsupported' };
@@ -99,9 +87,12 @@ window.AcuUIFactory = function (api) {
   }
 
   // 应该响的闹钟（所有正在留针的人、还没到点的）
+  const manipCompleted = (a, al) => al.kind === 'manip' && al.n <= (a.manip || []).length;
   function wanted(now = Date.now()) {
     const out = [];
-    for (const a of activeList()) for (const al of Acu.alarmsOf(a, cfg())) if (al.at > now + 1000) out.push({ a, al, id: Acu.notifId(a.id, al.idx) });
+    for (const a of activeList()) for (const al of Acu.alarmsOf(a, cfg())) {
+      if (al.at > now && !manipCompleted(a, al)) out.push({ a, al, id: Acu.notifId(a.id, al.idx) });
+    }
     return out;
   }
 
@@ -134,36 +125,45 @@ window.AcuUIFactory = function (api) {
     }
   }
 
-  let lastSched = '';
-  async function reconcile() {
-    const list = wanted();
-    if (isApp()) {
-      const sig = list.map((x) => x.id + '@' + x.al.at).join(',');
-      if (sig === lastSched) return;
-      try {
-        await ensureChannels();
-        const pend = await Native.LN.getPending();
-        const want = new Set(list.map((x) => x.id));
-        const cancel = (pend.notifications || []).filter((n) => !want.has(Number(n.id))).map((n) => ({ id: Number(n.id) }));
-        if (cancel.length) await Native.LN.cancel({ notifications: cancel });
-        const have = new Map((pend.notifications || []).map((n) => [Number(n.id), n]));
-        const add = [];
-        for (const x of list) {
-          const h = have.get(x.id);
-          const at = new Date(x.al.at);
-          if (h && h.schedule && h.schedule.at && Math.abs(new Date(h.schedule.at).getTime() - x.al.at) < 1500) continue;
-          if (h) await Native.LN.cancel({ notifications: [{ id: x.id }] });
-          const t = alarmText(x.a, x.al);
-          add.push({ id: x.id, title: t.title, body: t.body, channelId: x.al.kind === 'manip' ? 'acu-manip2' : 'acu-remove2', schedule: { at, allowWhileIdle: true }, smallIcon: 'ic_stat_acu', autoCancel: true, extra: { acu: x.a.id, kind: x.al.kind } });
-        }
-        if (add.length) await Native.LN.schedule({ notifications: add });
-        lastSched = sig;
-      } catch (e) {
-        console.warn('闹钟设置失败', e);
+  const testIds = { manip: 999001, remove: 999002 };
+  const channelId = (kind) => kind === 'manip' ? 'acu-manip2' : 'acu-remove2';
+  let nativeReconcile;
+  async function reconcileNative() {
+    try {
+      const p = await permState();
+      const exact = p.exact === 'granted';
+      const { notifications = [] } = await Native.LN.getPending();
+      const pending = new Map(notifications.map((n) => [Number(n.id), n]));
+      const list = wanted();
+      const want = new Set(list.map((x) => x.id));
+      const cancel = [...pending.keys()].filter((id) => !want.has(id) && id !== testIds.manip && id !== testIds.remove).map((id) => ({ id }));
+      if (cancel.length) await Native.LN.cancel({ notifications: cancel });
+      if (p.notify !== 'granted') return;
+
+      const add = [];
+      for (const { a, al, id } of list) {
+        const current = pending.get(id);
+        if (current?.extra?.alarmClock === exact && Math.abs(new Date(current.schedule?.at).getTime() - al.at) < 1000) continue;
+        if (al.at <= Date.now() || manipCompleted(a, al)) continue;
+        add.push({
+          id, ...alarmText(a, al), channelId: channelId(al.kind), sound: `${al.kind}.wav`,
+          schedule: { at: new Date(al.at), allowWhileIdle: true }, isExactNotification: exact,
+          smallIcon: 'ic_stat_acu', autoCancel: true, extra: { acu: a.id, kind: al.kind, alarmClock: exact },
+        });
       }
-      return;
+      if (add.length) await Native.LN.schedule({ notifications: add });
+    } catch (e) {
+      console.warn('闹钟设置失败', e);
+    }
+  }
+
+  async function reconcile() {
+    if (isApp()) {
+      nativeReconcile = (nativeReconcile || Promise.resolve()).then(reconcileNative);
+      return nativeReconcile;
     }
     // 网页版
+    const list = wanted();
     const want = new Set(list.map((x) => x.id));
     for (const [id, t] of webTimers) if (!want.has(id)) (clearTimeout(t), webTimers.delete(id));
     for (const x of list) {
@@ -175,7 +175,7 @@ window.AcuUIFactory = function (api) {
         setTimeout(() => {
           webTimers.delete(x.id);
           const a = getAcu(x.a.id);
-          if (!Acu.isActive(a)) return;
+          if (!Acu.isActive(a) || manipCompleted(a, x.al)) return;
           const t = alarmText(a, x.al);
           webBeep(x.al.kind);
           try {
@@ -191,14 +191,19 @@ window.AcuUIFactory = function (api) {
   }
 
   // 测试闹钟：10 秒后响一次
-  async function testAlarm(kind) {
+  async function testAlarm(kind, p) {
     if (isApp()) {
-      await ensureChannels();
-      await Native.LN.schedule({ notifications: [{ id: 999000 + (kind === 'remove' ? 2 : 1), title: kind === 'remove' ? '测试：拔针提醒' : '测试：行针提醒', body: '闹钟正常。可以现在锁屏试试，10 秒后会响。', channelId: kind === 'remove' ? 'acu-remove2' : 'acu-manip2', schedule: { at: new Date(Date.now() + 10000), allowWhileIdle: true }, smallIcon: 'ic_stat_acu' }] });
-    } else {
-      setTimeout(() => webBeep(kind), 10000);
+      if (p.notify !== 'granted' || p.exact !== 'granted') return toast('请先允许通知和「闹钟和提醒」', 'warn');
+      try {
+        await Native.LN.schedule({ notifications: [{ id: testIds[kind], title: kind === 'remove' ? '测试：拔针提醒' : '测试：行针提醒', body: '闹钟测试（10 秒）', channelId: channelId(kind), sound: `${kind}.wav`, schedule: { at: new Date(Date.now() + 10000), allowWhileIdle: true }, isExactMandatory: true, smallIcon: 'ic_stat_acu' }] });
+        toast('10 秒后响铃，可以锁屏试试');
+      } catch (e) {
+        toast('未能设置测试闹钟', 'warn');
+      }
+      return;
     }
-    toast('10 秒后响铃，可以锁屏试试');
+    setTimeout(() => webBeep(kind), 10000);
+    toast('保持页面打开，10 秒后响铃');
   }
 
   // ============================================================
@@ -210,13 +215,15 @@ window.AcuUIFactory = function (api) {
     const st = Acu.statusOf(a, cfg());
     const due = st.due;
     const dots = Array.from({ length: st.plannedManip }, (_, i) => `<i class="${i < st.manipDone ? 'on' : st.lastDue && i < st.lastDue.n ? 'miss' : ''}"></i>`).join('');
-    const line = due ? `<b class="red">该拔针了</b>${-st.left >= 1 ? `（超 ${mins(-st.left)} 分）` : ''}` : st.nextManip ? `行针 ${hhmm(new Date(st.nextManip.at).toISOString())}（第${st.nextManip.n}次）` : `拔针 ${hhmm(new Date(st.removeAt).toISOString())}`;
+    const manipLine = st.nextManip ? `<span class="nx">行针 ${hhmm(new Date(st.nextManip.at).toISOString())}（第${st.nextManip.n}次）</span>` : '';
+    const removeTime = `拔针 ${hhmm(new Date(st.removeAt).toISOString())}`;
+    const removeLine = due ? `<b class="red">该拔针了</b> ${removeTime}${-st.left >= 1 ? `（超 ${mins(-st.left)} 分）` : ''}` : removeTime;
     return `<div class="bed on${due ? ' due' : ''}" data-act="acu-bed" data-id="${esc(a.id)}">
       <span class="bn">${n}号床</span>
       <span class="who">${esc(nameOf(a))}</span>
       <span class="tm"><b>${mins(st.elapsed)}</b> / ${st.duration} 分</span>
       <span class="pg"><i style="width:${Math.round(st.progress * 100)}%"></i></span>
-      <span class="nx">${line}</span>
+      ${manipLine}<span class="nx">${removeLine}</span>
       <span class="dots">${dots}</span>
       <span class="acts"><button type="button" class="mini" data-act="acu-manip" data-id="${esc(a.id)}">行针</button><button type="button" class="mini red" data-act="acu-remove" data-id="${esc(a.id)}">拔针</button></span>
     </div>`;
@@ -282,7 +289,12 @@ window.AcuUIFactory = function (api) {
     if (document.visibilityState === 'visible') refresh();
   }, 15000);
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') refresh();
+    if (document.visibilityState !== 'visible') return;
+    refresh();
+    if (nativeReconcile) {
+      reconcile();
+      fillPerm();
+    }
   });
 
   // ============================================================
@@ -576,12 +588,17 @@ window.AcuUIFactory = function (api) {
     const a = getAcu(id);
     if (!Acu.isActive(a)) return;
     const now = new Date().toISOString();
+    let count;
     const ok = await commit((db) => {
       const x = db.acu.find((q) => q.id === id);
       x.manip = (x.manip || []).concat(now);
+      count = x.manip.length;
       x.updatedAt = now;
     });
-    if (ok) toast(`已记录：${nameOf(a)} 第 ${(a.manip || []).length + 1} 次行针`);
+    if (ok) {
+      await reconcile();
+      toast(`已记录：${nameOf(a)} 第 ${count} 次行针`);
+    }
     refresh();
   }
 
@@ -1035,14 +1052,16 @@ window.AcuUIFactory = function (api) {
     'acu-dur': (el) => changeSetting('duration', Number(el.dataset.d)),
     'acu-int': (el) => changeSetting('interval', Number(el.dataset.d)),
     'acu-test': async (el) => {
-      await askPerms();
-      await testAlarm(el.dataset.k);
+      const p = await askPerms();
+      await reconcile();
+      await testAlarm(el.dataset.k, p);
       fillPerm();
     },
     'acu-groups': () => saveGroups(),
     'acu-custom': () => saveCustomText(),
     'acu-perm': async () => {
       await askPerms();
+      await reconcile();
       fillPerm();
     },
   };
