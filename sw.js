@@ -1,6 +1,6 @@
 // 离线缓存：打开过一次之后，没有网络也能打开（数据本来就保存在手机里）
-const CACHE = 'yian-m-0.6.5';
-const FILES = ['./', 'index.html', 'style.css', 'app.js', 'logic.js', 'sync-core.js', 'herbs-data.js', 'acu.js', 'acu-ui.js', 'theme.js', 'manifest.webmanifest', 'icon-192.png'];
+const CACHE = 'yian-m-0.6.6';
+const FILES = ['./', 'index.html', 'style.css', 'app.js', 'logic.js', 'sync-core.js', 'herbs-data.js', 'acu.js', 'acu-ui.js', 'clinic-tools.js', 'theme.js', 'manifest.webmanifest', 'icon-192.png'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(FILES)).then(() => self.skipWaiting()));

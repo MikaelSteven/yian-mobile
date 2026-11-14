@@ -4,7 +4,7 @@
 // ============================================================
 (function () {
   'use strict';
-  const VERSION = '0.6.5';
+  const VERSION = '0.6.6';
   const $ = (s, r = document) => r.querySelector(s);
   const $$ = (s, r = document) => [...r.querySelectorAll(s)];
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -118,6 +118,7 @@
   };
 
   let Acu_ui = null; // 针灸部分（acu-ui.js），在下面「事件」那里创建
+  let ToolsUI;
 
   // ---------------- 小工具 ----------------
   let toastTimer;
@@ -226,8 +227,8 @@
   function chipHtml() {
     if (!S.cfg) return '';
     const y = S.sync;
-    const label = { syncing: '同步中', ok: y.lastAt ? hhmm(y.lastAt) : '已同步', offline: '离线', error: '出错', idle: y.lastAt ? hhmm(y.lastAt) : '待同步' }[y.state] || '';
-    return `<button class="chip-sync ${y.state}" data-act="syncnow" title="${esc(y.error || '点击立即同步')}"><i></i>${label}</button>`;
+    const label = { syncing: '同步中', ok: '已同步', offline: '离线', error: '出错', idle: '待同步' }[y.state];
+    return `<button class="chip-sync ${y.state}" data-act="syncnow" aria-label="${esc(label)}，立即同步" title="${esc(y.error || label)}"><i aria-hidden="true"></i></button>`;
   }
   function refreshChip() {
     const c = $('.chip-sync');
@@ -239,7 +240,7 @@
   // tabs：'list' / 'acu' 时显示底部的「病历 | 针灸」切换
   function tabsHtml(cur) {
     const n = Acu_ui ? Acu_ui.activeCount() : 0;
-    return `<nav class="tabs"><button data-act="tab-list" data-tab="list" class="${cur === 'list' ? 'on' : ''}">${ICON.list}<span>病历</span></button><button data-act="tab-acu" data-tab="acu" class="${cur === 'acu' ? 'on' : ''}">${ICON.needle}<span>针灸</span><i class="badge" ${n ? '' : 'hidden'}>${n || ''}</i></button></nav>`;
+    return `<nav class="tabs"><button data-act="tab-list" data-tab="list" class="${cur === 'list' ? 'on' : ''}">${ICON.list}<span>病历</span></button><button data-act="tab-acu" data-tab="acu" class="${cur === 'acu' ? 'on' : ''}">${ICON.needle}<span>针灸</span><i class="badge" ${n ? '' : 'hidden'}>${n || ''}</i></button><button data-act="tools" data-tab="tools" class="${cur === 'tools' ? 'on' : ''}">${ToolsUI.icon}<span>工具</span></button></nav>`;
   }
   function page({ barHtml, html, fab = '', savebar = '', tabs = '' }) {
     $('#bar').innerHTML = barHtml;
@@ -312,6 +313,9 @@
     else if (r.name === 'pe' && getPatient(r.a)) viewPatientEdit(r.a);
     else if (r.name === 'np') viewPatientEdit(null);
     else if (r.name === 'set') viewSettings();
+    else if (ToolsUI.route(r)) {
+      /* 病历工具 */
+    }
     else if (Acu_ui && Acu_ui.route(r)) {
       /* 针灸的页面 */
     } else {
@@ -460,7 +464,7 @@
             ? `<div class="card"><h3>档案</h3>${phone ? `<div class="kv"><b>电话</b><span><a href="tel:${esc(phone)}">${esc(phone)}</a></span></div>` : ''}${kv('过敏', p.allergy)}${kv('既往史', p.history)}${kv('备注', p.note)}${(p.tags || []).length ? `<div class="kv"><b>标签</b><span>${p.tags.map((t) => `<span class="tag">${esc(t)}</span>`).join(' ')}</span></div>` : ''}</div>`
             : ''
         }
-        <div class="count">就诊记录（${vs.length} 次）</div>
+        <div class="count">就诊记录（${vs.length} 次） ${vs.length > 1 ? `<button class="lbtn" data-act="compare" data-pid="${esc(id)}">处方对比</button>` : ''}</div>
         ${
           vs.length
             ? `<div class="list">${vs
@@ -663,7 +667,7 @@
           ${FIELDS_A.map((f) => fieldHtml(d, f)).join('')}
           <div class="two">${['tcmDx', 'pattern'].map((k) => `<label class="field"><span>${k === 'tcmDx' ? '诊断' : '证型'}</span><input type="text" data-field="${k}" value="${esc(d[k] || '')}" /></label>`).join('')}</div>
           ${(d.photos || []).length ? `<div class="photo-note">这条医案有 ${d.photos.length} 张照片，保存在电脑上（手机版不同步照片）。</div>` : ''}
-          <div class="linkbar"><button type="button" class="lbtn" data-act="copy-prev-case">带入上次病历</button></div>
+          <div class="linkbar"><button type="button" class="lbtn" data-act="copy-prev-case">带入上次病历</button>${v ? `<button type="button" class="lbtn" data-act="similar" data-id="${esc(v.id)}">相似医案</button><button type="button" class="lbtn" data-act="compare" data-pid="${esc(pid)}" data-id="${esc(v.id)}">处方对比</button><button type="button" class="lbtn${d.star ? ' on' : ''}" data-act="star-v" aria-pressed="${!!d.star}">${d.star ? '已收藏' : '收藏'}</button>` : ''}</div>
         </div>
         <div class="card">
           <h3>中药处方</h3>
@@ -671,6 +675,8 @@
           <div class="linkbar">
             <button type="button" class="lbtn" data-act="copy-prev-rx">带入上次处方</button>
             <button type="button" class="lbtn" data-act="paste-rx">粘贴识别</button>
+            <button type="button" class="lbtn" data-act="pick-template">协定方</button>
+            <button type="button" class="lbtn" data-act="save-template">存为协定方</button>
             <button type="button" class="lbtn" data-act="copy-rx">复制方药</button>
             <button type="button" class="lbtn red" data-act="clear-rx">清空</button>
           </div>
@@ -1000,6 +1006,8 @@
         toast('这条记录已在别处被删除', 'warn');
         back('/acu');
       }
+    } else if (ToolsUI.refresh()) {
+      /* 刷新工具页 */
     } else if ((S.view === 'visit' || S.view === 'pedit') && !S.dirty) {
       const r = parseRoute();
       if ((r.name === 'v' && !getVisit(r.a)) || (r.name === 'pe' && !getPatient(r.a))) {
@@ -1034,6 +1042,13 @@
     'edit-p': (el) => go('/pe/' + encodeURIComponent(el.dataset.id)),
     'open-v': (el) => go('/v/' + encodeURIComponent(el.dataset.id)),
     'new-v': (el) => go('/nv/' + encodeURIComponent(el.dataset.id)),
+    'star-v': (el) => {
+      S.draft.star = !S.draft.star;
+      el.textContent = S.draft.star ? '已收藏' : '收藏';
+      el.classList.toggle('on', S.draft.star);
+      el.setAttribute('aria-pressed', S.draft.star);
+      markDirty();
+    },
     'save-p': async () => {
       if (await savePatient()) {
         const id = S.pdraft.id;
@@ -1045,7 +1060,7 @@
     'del-p': async () => {
       const p = getPatient(S.pdraft.id);
       const n = visitsOf(p.id).length;
-      if (!(await confirmSheet('删除患者', `确定删除「${p.name}」${n ? `及其 ${n} 条医案` : ''}吗？删除后可在电脑版的「回收站」恢复。`, '删除', true))) return;
+      if (!(await confirmSheet('删除患者', `确定删除「${p.name}」${n ? `及其 ${n} 条医案` : ''}吗？删除后可在「回收站」恢复。`, '删除', true))) return;
       const now = new Date().toISOString();
       const ok = await commit((db) => {
         const x = db.patients.find((q) => q.id === p.id);
@@ -1085,7 +1100,7 @@
       back('/p/' + encodeURIComponent(S.draft.patientId));
     },
     'del-v': async () => {
-      if (!(await confirmSheet('删除医案', `确定删除 ${S.draft.date} 这条医案吗？删除后可在电脑版的「回收站」恢复。`, '删除', true))) return;
+      if (!(await confirmSheet('删除医案', `确定删除 ${S.draft.date} 这条医案吗？删除后可在「回收站」恢复。`, '删除', true))) return;
       const now = new Date().toISOString();
       const id = S.draft.id;
       const pid = S.draft.patientId;
@@ -1206,6 +1221,9 @@
     markDirty();
   }
 
+  ToolsUI = window.ClinicTools({ S, $, $$, esc, clone, Logic, page, bar, backBtn, chipHtml, go, getPatient, getVisit, patientsActive, visitsOf, fmtWhen, sheet, confirmSheet, toast, commit, defDoses, defUsage, collectDraft, setHerbs, fillHerbList, reconcile: () => Acu_ui?.reconcile() });
+  Object.assign(acts, ToolsUI.acts);
+
   // 针灸部分
   if (window.AcuUIFactory) {
     Acu_ui = window.AcuUIFactory({ S, $, $$, esc, sheet, confirmSheet, alertSheet, toast, commit, page, bar, backBtn, chipHtml, go, back, render, getPatient, patientsActive, hhmm, ICON, Logic });
@@ -1225,6 +1243,10 @@
   // Android 系统返回键：先关最上层弹窗，再沿用页面自己的返回按钮。
   window.yianHandleSystemBack = () => {
     const target = $('#sheetRoot .sheet-mask:last-child') || $('#bar [data-act="back"]');
+    if (!target && S.view === 'tools' && S.depth > 0) {
+      back();
+      return true;
+    }
     if (!target) return false;
     target.click();
     return true;
