@@ -4,7 +4,7 @@
 // ============================================================
 (function () {
   'use strict';
-  const VERSION = '0.6.4';
+  const VERSION = '0.6.5';
   const $ = (s, r = document) => r.querySelector(s);
   const $$ = (s, r = document) => [...r.querySelectorAll(s)];
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -1220,6 +1220,14 @@
     history.replaceState({ d: 0 }, '', '#/');
     S.depth = 0;
     render();
+  };
+
+  // Android 系统返回键：先关最上层弹窗，再沿用页面自己的返回按钮。
+  window.yianHandleSystemBack = () => {
+    const target = $('#sheetRoot .sheet-mask:last-child') || $('#bar [data-act="back"]');
+    if (!target) return false;
+    target.click();
+    return true;
   };
 
   document.addEventListener('click', (e) => {
