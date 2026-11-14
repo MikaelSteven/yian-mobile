@@ -822,7 +822,7 @@ window.AcuUIFactory = function (api) {
   // ============================================================
   function patientSectionHtml(pid) {
     const list = acuOf(pid);
-    return `<div class="count" style="display:flex;align-items:center">扎针记录（${list.length} 次）<button class="lbtn right" data-act="acu-startp" data-id="${esc(pid)}">＋ 扎针</button></div>${list.length ? `<div class="list">${list.slice(0, 30).map(rowHtml).join('')}</div>` : ''}`;
+    return `<div class="count" style="display:flex;align-items:center">扎针记录（${list.length} 次）<button class="lbtn right" data-act="acu-startp" data-id="${esc(pid)}">＋ 扎针</button></div>${list.length ? `<div class="list">${list.length > 30 ? `<div class="count">只显示最近 30 次</div>` : ''}${list.slice(0, 30).reverse().map(rowHtml).join('')}</div>` : ''}`;
   }
 
   function settingsCardHtml() {

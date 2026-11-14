@@ -4,7 +4,7 @@
 // ============================================================
 (function () {
   'use strict';
-  const VERSION = '0.6.1';
+  const VERSION = '0.6.2';
   const $ = (s, r = document) => r.querySelector(s);
   const $$ = (s, r = document) => [...r.querySelectorAll(s)];
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -465,7 +465,6 @@
           vs.length
             ? `<div class="list">${vs
                 .map((v, i) => ({ v, i }))
-                .reverse()
                 .map(
                   ({ v, i }) => `<button class="vrow" data-act="open-v" data-id="${esc(v.id)}">
               <div class="h"><b>${esc(v.date)}</b><span style="color:var(--muted)">${esc(Logic.shortVisitLabel(i))}</span>${(v.photos || []).length ? `<span class="tag">照片 ${v.photos.length}</span>` : ''}</div>

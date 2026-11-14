@@ -1,5 +1,5 @@
 // 离线缓存：打开过一次之后，没有网络也能打开（数据本来就保存在手机里）
-const CACHE = 'yian-m-0.6.1';
+const CACHE = 'yian-m-0.6.2';
 const FILES = ['./', 'index.html', 'style.css', 'app.js', 'logic.js', 'sync-core.js', 'herbs-data.js', 'acu.js', 'acu-ui.js', 'manifest.webmanifest', 'icon-192.png'];
 
 self.addEventListener('install', (e) => {
