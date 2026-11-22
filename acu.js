@@ -73,9 +73,7 @@
   // 拆开一串穴位：「百会，四神聪、双足三里 内关(双)」→ 数组（去掉重复）
   function splitPoints(text) {
     const out = [];
-    String(text || '')
-      .replace(/[（(]\s*(双|双侧|左|右|左侧|右侧)\s*[)）]/g, '（$1）')
-      .split(/[\s,，、;；。.\/|+＋]+/)
+    (String(text || '').match(/(?:[（(][^)）]*[)）]|[^\s,，、;；。.\/|+＋])+/g) || [])
       .map((s) => s.trim())
       .filter(Boolean)
       .forEach((p) => {
@@ -85,11 +83,7 @@
   }
   // 去掉左右双的标记，得到穴名本身
   function pointBase(p) {
-    const s = String(p || '')
-      .replace(/[（(][^)）]*[)）]/g, '')
-      .replace(/^(双侧|双|左侧|右侧|左|右|两侧)/, '')
-      .replace(/(双侧|双|两侧)$/, '')
-      .trim();
+    const s = partsOf(canonPoint(p)).name;
     return ALIAS[s] || CUSTOM_ALIAS[s] || FIX[s] || s;
   }
   // 这个写法代表几根针：标了「双」的算 2 根，其余 1 根
@@ -99,7 +93,7 @@
     if (/刺血|放血|点刺|拔罐/.test(s)) return 0;
     if (/灸/.test(s) && !/温针/.test(s)) return 0;
     if (pointBase(s) === '神阙') return 0;
-    return /双|两侧/.test(s) ? 2 : 1;
+    return pointSide(s) === '双' ? 2 : 1;
   }
   // 拔针时要核对的（留着针的）
   const needsRemoval = (p) => needleCount(p) > 0;
@@ -195,15 +189,17 @@
   };
   // 把写错的 / 别名换成正式的名字（左右双、括号里的说明都保留）
   function canonPoint(p) {
-    const s = String(p || '');
-    const m = /^(双侧|双|左侧|右侧|左|右|两侧)?([^（(]*)([\s\S]*)$/.exec(s);
+    const s = String(p || '').trim();
+    const m = /^(双侧|双|左侧|右侧|左|右|两侧|两(?=[一-龥]))?([^（(]*)([\s\S]*)$/.exec(s);
     const tail = /(双侧|双|两侧)$/.exec(m[2]);
     const core = tail ? m[2].slice(0, -tail[0].length) : m[2];
-    const fixed = core
+    const warm = /^(.+?)温针(?:灸)?$/.exec(core);
+    const fixed = (warm ? warm[1] : core)
       .split('透')
       .map((x) => FIX[x.trim()] || CUSTOM_ALIAS[x.trim()] || x)
       .join('透');
-    return (m[1] || '') + fixed + (tail ? tail[0] : '') + m[3];
+    const side = m[1] === '两' ? '双' : m[1] || '';
+    return side + fixed + (tail ? tail[0] : '') + (warm ? '（温针）' : '') + m[3];
   }
   // 拆开 / 拼回一个穴位的写法：「右仙骨（刺血，胃）」⇄ { side:'右', name:'仙骨', tags:['刺血','胃'] }
   function partsOf(p) {
@@ -212,14 +208,14 @@
     let side = '';
     s = s.replace(/[（(]([^)）]*)[)）]/g, (_, t) => {
       for (const x of t.split(/[，,、]/).map((y) => y.trim()).filter(Boolean)) {
-        if (/^(双|双侧|两侧)$/.test(x)) side = '双';
+        if (/^(双|双侧|两|两侧)$/.test(x)) side = '双';
         else if (/^(左|左侧)$/.test(x)) side = '左';
         else if (/^(右|右侧)$/.test(x)) side = '右';
         else tags.push(x);
       }
       return '';
     });
-    const pre = /^(双侧|两侧|双|左侧|右侧|左|右)/.exec(s);
+    const pre = /^(双侧|两侧|双|左侧|右侧|左|右|两(?=[一-龥]))/.exec(s);
     if (pre) {
       side = pre[1][0] === '两' ? '双' : pre[1][0];
       s = s.slice(pre[0].length);
@@ -286,17 +282,17 @@
     return v;
   };
 
-  // 这条留针的所有闹钟：行针固定在开始后 15、30、45 分钟（去没去都不改），到时间拔针；
-  // 拔针到了还没点「拔针」，再过 5、10 分钟各提醒一次
+  // 第一次拔针提醒提前 90 秒，超时提醒仍按计划拔针时间计算。
   function alarmsOf(a, cfg) {
-    if (!isActive(a)) return [];
+    if (!isActive(a) || !a.startAt) return [];
     const t0 = new Date(a.startAt).getTime();
     if (!Number.isFinite(t0)) return [];
     const dur = durOf(a, cfg);
     const iv = intOf(a, cfg);
     const out = [];
-    if (iv > 0) for (let k = 1; k * iv < dur; k++) out.push({ idx: k, kind: 'manip', n: k, at: t0 + k * iv * 60000 });
-    out.push({ idx: 50, kind: 'remove', n: 0, at: t0 + dur * 60000 });
+    // 保留旧通知编号，较密的间隔用独立编号，避免覆盖拔针提醒。
+    if (iv > 0) for (let k = 1; k * iv < dur - 1.5; k++) out.push({ idx: k < 50 ? k : k + 14, kind: 'manip', n: k, at: t0 + k * iv * 60000 });
+    out.push({ idx: 50, kind: 'remove', n: 0, at: t0 + dur * 60000 - 90000 });
     out.push({ idx: 51, kind: 'remove', n: 1, at: t0 + (dur + 5) * 60000 });
     out.push({ idx: 52, kind: 'remove', n: 2, at: t0 + (dur + 10) * 60000 });
     return out;
@@ -310,7 +306,8 @@
       h ^= s.charCodeAt(i);
       h = Math.imul(h, 16777619);
     }
-    return ((h >>> 0) % 20000000) * 64 + (idx % 64) + 1;
+    if (idx >= 64) return 1280000001 + ((h >>> 0) % 3000000) * 256 + (idx - 64);
+    return ((h >>> 0) % 20000000) * 64 + idx + 1;
   }
 
   // 现在的状态：留了多久、下一次行针、几点拔针、是否已到时间
@@ -380,10 +377,7 @@
     if (i < 0) list.push(p);
     else if (p.length > list[i].length) list[i] = p; // 后写的带刺法 / 方位，更具体
   }
-  const pointSide = (p) => {
-    const m = /^(双|左|右)/.exec(String(p || '')) || /[（(](双|左|右)[)）]/.exec(String(p || ''));
-    return m ? m[1] : '';
-  };
+  const pointSide = (p) => partsOf(p).side;
 
   // ---------- 文字导入（手机记事本里的旧记录） ----------
   // 支持两种写法：
@@ -440,13 +434,13 @@
         continue;
       }
       let side = '';
-      const sm = /^(双侧|两侧|左侧|右侧|双|左|右)/.exec(rest);
+      const sm = /^(双侧|两侧|左侧|右侧|双|左|右|两(?=[一-龥]))/.exec(rest);
       if (sm) {
         side = sm[1].replace(/侧$/, '').replace('两', '双');
         i += sm[0].length;
       }
       const r2 = s.slice(i);
-      const name = dict.find((n) => r2.startsWith(n));
+      const name = dict.find((n) => r2.startsWith(n) && !/温针(?:灸)?$/.test(n));
       if (!name) {
         // 穴位后面跟着的几个字的说明（「中脘胃寒」）：算作这个穴位的备注
         if (out.length && !side && r2.length <= 4 && /^[一-龥]+$/.test(r2) && !FEEL_CH.test(r2) && !AREAS.has(out[out.length - 1].name)) {
@@ -745,8 +739,8 @@
     const lines = String(text || '')
       .replace(/\r\n?/g, '\n')
       .split('\n')
-      .map((l) => l.trim())
-      .filter(Boolean);
+      .map((l) => l.trim().replace(/^[-*]\s+\[[ xX]\]\s*/, ''))
+      .filter((l) => l && !/^#{1,6}\s/.test(l));
     const items = [];
     let cur = null; // 当前患者 { name, patientId, gender, age, complaint, lastPoints, lastDate }
 
@@ -785,12 +779,11 @@
         if (i >= 0) pts[i] = labelOf({ name: pts[i].replace(/（.*$/, ''), side: pointSide(pts[i]) === '双' ? '双' : '', mod, note: '' });
         else pts.push(`${ps.moxaTo}（${mod}）`);
       }
-      const keep = pts.slice();
-      // 这一次「没灸」（下次写「一样」时还按原来的）
-      if (ps.noMoxa.length)
-        pts = pts
-          .filter((p) => !(isMoxa(p) && pointBase(p) === '神阙'))
-          .map((p) => (ps.noMoxa.includes('*') || ps.noMoxa.includes(pointBase(p)) ? stripMoxa(p) : p));
+      // 「一样」承接上一次实际做的处理，包括明确省略的灸法。
+      if (ps.noMoxa.length) {
+        const omit = (p) => ps.noMoxa.includes('*') || ps.noMoxa.includes(pointBase(p));
+        pts = pts.filter((p) => !(omit(p) && isMoxa(p) && pointBase(p) === '神阙')).map((p) => omit(p) ? stripMoxa(p) : p);
+      }
       // 刺血不会一直「一样」下去：上次刺血、这次没写刺血但写了「一样」的，照上次（原文就是这么记的）
       const remarks = (list) => list.join('，');
       const complaint = cur && cur.complaint ? cur.complaint : '';
@@ -799,8 +792,8 @@
       const it = { date: date || null, noDate: !date, patientId: cur ? cur.patientId : null, name: cur ? cur.name : '', gender: cur ? cur.gender : '', age: cur ? cur.age : null, points: pts, symptoms: sym, feeling: feel, raw };
       items.push(it);
       if (cur) {
-        if (keep.length) cur.lastPoints = keep;
-        if (keep.length && !cur.firstPoints) cur.firstPoints = keep;
+        cur.lastPoints = pts.slice();
+        if (pts.length && !cur.firstPoints) cur.firstPoints = pts.slice();
         if (date) cur.lastDate = date;
       }
     };

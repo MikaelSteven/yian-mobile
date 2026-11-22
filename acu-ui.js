@@ -82,7 +82,7 @@ window.AcuUIFactory = function (api) {
   function alarmText(a, al) {
     const who = `${a.bed}号床 ${nameOf(a)}`;
     if (al.kind === 'manip') return { title: `行针：${who}`, body: `第 ${al.n} 次行针（已留针 ${al.n * Acu.statusOf(a, cfg()).interval} 分钟）` };
-    if (al.n === 0) return { title: `拔针：${who}`, body: `留针 ${Acu.statusOf(a, cfg()).duration} 分钟到了。拔针时逐个核对穴位。` };
+    if (al.n === 0) return { title: `准备拔针：${who}`, body: '距计划拔针还有 1 分 30 秒，可以开始最后一次行针。' };
     return { title: `还没拔针：${who}`, body: `已超时 ${al.n * 5} 分钟，请尽快拔针` };
   }
 
@@ -214,7 +214,6 @@ window.AcuUIFactory = function (api) {
     if (!a) return `<button class="bed empty" data-act="acu-start" data-bed="${n}"><span class="bn">${n}号床</span><span class="plus">＋</span><span class="em">空床，点这里扎针</span></button>`;
     const st = Acu.statusOf(a, cfg());
     const due = st.due;
-    const dots = Array.from({ length: st.plannedManip }, (_, i) => `<i class="${i < st.manipDone ? 'on' : st.lastDue && i < st.lastDue.n ? 'miss' : ''}"></i>`).join('');
     const manipLine = st.nextManip ? `<span class="nx">行针 ${hhmm(new Date(st.nextManip.at).toISOString())}（第${st.nextManip.n}次）</span>` : '';
     const removeTime = `拔针 ${hhmm(new Date(st.removeAt).toISOString())}`;
     const removeLine = due ? `<b class="red">该拔针了</b> ${removeTime}${-st.left >= 1 ? `（超 ${mins(-st.left)} 分）` : ''}` : removeTime;
@@ -224,8 +223,7 @@ window.AcuUIFactory = function (api) {
       <span class="tm"><b>${mins(st.elapsed)}</b> / ${st.duration} 分</span>
       <span class="pg"><i style="width:${Math.round(st.progress * 100)}%"></i></span>
       ${manipLine}<span class="nx">${removeLine}</span>
-      <span class="dots">${dots}</span>
-      <span class="acts"><button type="button" class="mini" data-act="acu-manip" data-id="${esc(a.id)}">行针</button><button type="button" class="mini red" data-act="acu-remove" data-id="${esc(a.id)}">拔针</button></span>
+      <span class="acts"><button type="button" class="mini red" data-act="acu-remove" data-id="${esc(a.id)}">拔针</button></span>
     </div>`;
   }
   function bedsHtml() {
@@ -237,14 +235,13 @@ window.AcuUIFactory = function (api) {
     const t = Acu.todayStr();
     const list = acuList()
       .filter((a) => a.date === t && a.status !== 'active')
-      .sort((a, b) => (b.endAt || '').localeCompare(a.endAt || ''));
+      .sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
     if (!list.length) return '';
     return `<div class="count">今天已拔针（${list.length} 人）</div><div class="list">${list.map(rowHtml).join('')}</div>`;
   }
   function rowHtml(a) {
-    const time = a.startAt ? hhmm(a.startAt) + (a.endAt ? '–' + hhmm(a.endAt) : '') : '';
     return `<button class="vrow" data-act="acu-open" data-id="${esc(a.id)}">
-      <div class="h"><b>${esc(nameOf(a))}</b><span style="color:var(--muted)">${esc(a.date || '日期不详')}${time ? ' ' + time : ''}${a.bed ? ` · ${a.bed}号床` : ''}</span>${Acu.isActive(a) ? '<span class="tag">留针中</span>' : ''}</div>
+      <div class="h"><b>${esc(nameOf(a))}</b><span style="color:var(--muted)">${esc(a.date || '日期不详')}${a.bed ? ` · ${a.bed}号床` : ''}</span>${Acu.isActive(a) ? '<span class="tag">留针中</span>' : ''}</div>
       ${a.symptoms ? `<div class="c">${esc(a.symptoms)}</div>` : ''}
       <div class="r">${esc(ptsLine(a.points)) || '（未写穴位）'}</div>
       ${a.feeling ? `<div class="r" style="color:var(--green)">针后：${esc(a.feeling)}</div>` : ''}
@@ -260,7 +257,7 @@ window.AcuUIFactory = function (api) {
     S.view = 'acu';
     const n = activeList().length;
     page({
-      barHtml: bar('', `针灸<small>${n ? `${n} 人留针中` : '没有人在留针'}</small>`, chipHtml() + `<button class="ibtn" data-act="settings" aria-label="设置">${ICON.gear}</button>`),
+      barHtml: bar('', `针灸<small>${n ? `${n} 人留针中` : '没有人在留针'}</small>`, chipHtml() + `<button class="ibtn" data-act="acu-bed-count" aria-label="增减床位" title="增减床位">${ICON.plus}</button><button class="ibtn" data-act="settings" aria-label="设置">${ICON.gear}</button>`),
       html: `${webHintHtml()}<div id="bedsBox">${bedsHtml()}</div>
         <div class="acu-tools"><button class="btn" data-act="acu-all">全部扎针记录</button><button class="btn" data-act="acu-import">记事本文字导入</button></div>
         <div id="todayBox">${todayHtml()}</div>`,
@@ -302,7 +299,7 @@ window.AcuUIFactory = function (api) {
   // ============================================================
   function ptsEditorHtml(points) {
     useCustom();
-    return `<div class="pts" id="pts">${(points || []).map((p, i) => `<button type="button" class="pt${Acu.isKnownPoint(p) ? '' : ' unk'}" data-act="acu-pt" data-i="${i}">${esc(p)}</button>`).join('')}<input id="ptIn" type="text" placeholder="${(points || []).length ? '继续加穴位…' : '穴位：名称或拼音首字母（zsl＝足三里）'}" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="done" /></div>
+    return `<div class="pts" id="pts">${(points || []).map((p, i) => `<span class="pt-chip" data-i="${i}"><button type="button" class="pt${Acu.isKnownPoint(p) ? '' : ' unk'}" data-i="${i}">${esc(p)}</button><button type="button" class="pt-grip" aria-label="移动${esc(p)}" aria-keyshortcuts="Alt+ArrowLeft Alt+ArrowRight" ${points.length < 2 ? 'hidden' : ''}>⠿</button></span>`).join('')}<input id="ptIn" type="text" placeholder="${(points || []).length ? '继续加穴位…' : '穴位：名称或拼音首字母（zsl＝足三里）'}" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="done" /></div>
       <div class="sugg" id="ptSug"></div>`;
   }
   let usageCache = null;
@@ -318,11 +315,56 @@ window.AcuUIFactory = function (api) {
       const keep = document.activeElement === inp;
       const v = inp.value;
       box.outerHTML = ptsEditorHtml(d.points).replace(/<div class="sugg"[^]*$/, '');
-      bindPts(d, onChange);
       $('#ptIn').value = v;
+      bindPts(d, onChange);
       if (keep) $('#ptIn').focus();
-      showSug();
     };
+    const move = (from, to, focus = false) => {
+      if (from === to || to < 0 || to >= d.points.length) return;
+      const [point] = d.points.splice(from, 1);
+      d.points.splice(to, 0, point);
+      onChange();
+      redraw();
+      if (focus) $(`#pts .pt-chip[data-i="${to}"] .pt-grip`).focus();
+      toast(`${point}移到第 ${to + 1} 位`);
+    };
+    let drag;
+    const clearDrag = () => {
+      drag = null;
+      box.querySelector('.pt-drop')?.classList.remove('pt-drop');
+    };
+    box.addEventListener('pointerdown', (e) => {
+      const grip = e.target.closest('.pt-grip');
+      if (!grip || e.button !== 0 || drag) return;
+      drag = { pointer: e.pointerId, from: Number(grip.parentElement.dataset.i), to: null, grip };
+      grip.setPointerCapture(e.pointerId);
+    });
+    box.addEventListener('pointermove', (e) => {
+      if (drag?.pointer !== e.pointerId) return;
+      const chip = document.elementFromPoint(e.clientX, e.clientY)?.closest('.pt-chip');
+      box.querySelector('.pt-drop')?.classList.remove('pt-drop');
+      drag.to = chip && box.contains(chip) ? Number(chip.dataset.i) : null;
+      if (drag.to != null && drag.to !== drag.from) chip.classList.add('pt-drop');
+    });
+    box.addEventListener('pointerup', (e) => {
+      if (drag?.pointer !== e.pointerId) return;
+      const { from, to } = drag;
+      clearDrag();
+      if (to != null) move(from, to);
+    });
+    box.addEventListener('lostpointercapture', (e) => { if (drag?.pointer === e.pointerId) clearDrag(); });
+    box.addEventListener('keydown', (e) => {
+      const grip = e.target.closest('.pt-grip');
+      if (!grip) return;
+      if (e.key === 'Escape' && drag) {
+        drag.grip.releasePointerCapture(drag.pointer);
+        clearDrag();
+      }
+      if (!e.altKey || !['ArrowLeft', 'ArrowRight'].includes(e.key)) return;
+      e.preventDefault();
+      const i = Number(grip.parentElement.dataset.i);
+      move(i, i + (e.key === 'ArrowLeft' ? -1 : 1), true);
+    });
     const add = (txt) => {
       for (const p of Acu.expandGroups(Acu.splitPoints(txt), groups())) Acu.addPoint(d.points, Acu.canonPoint(p));
       inp.value = '';
@@ -332,7 +374,7 @@ window.AcuUIFactory = function (api) {
     function showSug() {
       const s = $('#ptSug');
       const raw = $('#ptIn').value.trim();
-      const side = /^(双|左|右)/.exec(raw);
+      const side = /^(双|两|左|右)/.exec(raw);
       const q = side ? raw.slice(1) : raw;
       let names;
       if (q) names = Acu.searchPoints(q, usage(), 14, groups());
@@ -355,7 +397,7 @@ window.AcuUIFactory = function (api) {
         const v = e.target.value.trim();
         if (!v) return;
         const first = $('#ptSug .sg');
-        add(first && !first.classList.contains('raw') ? first.dataset.name : v);
+        add(first && !first.classList.contains('raw') && !/温针(?:灸)?$/.test(v) ? first.dataset.name : v);
       } else if (e.key === 'Backspace' && !e.target.value && d.points.length) {
         d.points.pop();
         onChange();
@@ -369,6 +411,7 @@ window.AcuUIFactory = function (api) {
       $('#ptIn').focus();
     };
     box.onclick = async (e) => {
+      if (e.target.closest('.pt-grip')) return;
       const b = e.target.closest('.pt');
       if (!b) return $('#ptIn').focus();
       const i = Number(b.dataset.i);
@@ -450,18 +493,15 @@ window.AcuUIFactory = function (api) {
     const last = d.patientId ? acuOf(d.patientId).find((a) => a.id !== d.id && (a.points || []).length) : null;
     return `<form id="aform" autocomplete="off" onsubmit="return false">
       <div class="card"><h3>患者${d.bed ? `<span class="bedtag">${d.bed}号床</span>` : ''}</h3><div id="pickBox">${patientPickHtml(d)}</div></div>
-      <div class="card"><h3 class="hflex">穴位 <small id="ncount">${d.points.length ? `${d.points.length} 穴` : ''}</small>${last ? `<button type="button" class="lbtn right" data-act="acu-last">用上次的（${esc(last.date)}）</button>` : ''}</h3>${ptsEditorHtml(d.points)}</div>
+      <div class="card"><h3 class="hflex">穴位 <small id="ncount">${d.points.length ? `${d.points.length} 穴` : ''}</small></h3><div class="chips acu-point-tools"><button type="button" class="lbtn" data-act="acu-copy">复制穴位</button>${last ? `<button type="button" class="lbtn" data-act="acu-last">用上次的（${esc(last.date)}）</button>` : ''}</div>${ptsEditorHtml(d.points)}</div>
       <div class="card"><h3>症状 <small>选填</small></h3><textarea id="aSym" rows="2" placeholder="这次哪里不舒服">${esc(d.symptoms || '')}</textarea></div>
       ${
         isNew
-          ? `<p class="hint" style="margin:0 4px 90px">点「开始留针」开始计时：每 ${c.interval} 分钟提醒行针，${c.duration} 分钟提醒拔针。时长可在设置里改。</p>`
+          ? `<p class="hint" style="margin:0 4px 90px">留针 ${c.duration} 分钟，拔针前 1 分 30 秒响铃。${c.interval ? `留针期间每 ${c.interval} 分钟提醒行针。` : ''}</p>`
           : `<div class="card"><h3>针后感觉 <small>选填</small></h3><textarea id="aFeel" rows="2">${esc(d.feeling || '')}</textarea></div>
         <div class="card"><h3>时间</h3>
           <div class="two"><label class="field"><span>日期</span><input type="date" id="aDate" value="${esc(d.date || '')}" /></label>
           <label class="field"><span>床位</span><input type="number" id="aBed" inputmode="numeric" min="1" max="12" value="${esc(d.bed || '')}" /></label></div>
-          <div class="two"><label class="field"><span>开始</span><input type="time" id="aStart" value="${d.startAt ? hhmm(d.startAt) : ''}" /></label>
-          <label class="field"><span>拔针</span><input type="time" id="aEnd" value="${d.endAt ? hhmm(d.endAt) : ''}" ${d.status === 'active' ? 'disabled placeholder="留针中"' : ''} /></label></div>
-          ${(d.manip || []).length ? `<div class="kv"><b>行针</b><span>${d.manip.map((t) => hhmm(t)).join('、')}</span></div>` : ''}
         </div><div style="height:80px"></div>`
       }
     </form>`;
@@ -472,7 +512,7 @@ window.AcuUIFactory = function (api) {
     S.view = id ? 'acuedit' : 'acunew';
     S.formHash = location.hash;
     if (!S.acuDraft || S.acuDraft._for !== location.hash) {
-      S.acuDraft = a ? Object.assign(JSON.parse(JSON.stringify(a)), { _for: location.hash }) : { _for: location.hash, id: null, patientId: S.acuPresetPatient || null, bed: Number(bed) || null, points: [], symptoms: '', q: '' };
+      S.acuDraft = a ? Object.assign(JSON.parse(JSON.stringify(a)), { _for: location.hash, points: (a.points || []).map(Acu.canonPoint) }) : { _for: location.hash, id: null, patientId: S.acuPresetPatient || null, bed: Number(bed) || null, points: [], symptoms: '', q: '' };
       S.acuPresetPatient = null;
     }
     const d = S.acuDraft;
@@ -512,15 +552,6 @@ window.AcuUIFactory = function (api) {
     d.points = (d.points || []).map(Acu.canonPoint);
     if (v('aDate') !== undefined && v('aDate')) d.date = v('aDate');
     if (v('aBed') !== undefined) d.bed = Number(v('aBed')) || null;
-    const setTime = (key, val) => {
-      if (!val) return;
-      const [h, m] = val.split(':').map(Number);
-      const base = new Date((d.date || Acu.todayStr()) + 'T00:00:00');
-      base.setHours(h, m, 0, 0);
-      d[key] = base.toISOString();
-    };
-    if (v('aStart') !== undefined) setTime('startAt', v('aStart'));
-    if (v('aEnd') !== undefined && d.status !== 'active') setTime('endAt', v('aEnd'));
   }
 
   function createPatientIfNeeded(db, d, now) {
@@ -564,7 +595,8 @@ window.AcuUIFactory = function (api) {
     const ok = await commit((db) => {
       const x = db.acu.find((q) => q.id === d.id);
       if (!x) throw new Error('这条记录已被删除');
-      Object.assign(x, { points: d.points.slice(), symptoms: d.symptoms || '', feeling: d.feeling || '', date: d.date || x.date, bed: d.bed, startAt: d.startAt || x.startAt, endAt: x.status === 'active' ? null : d.endAt || x.endAt, updatedAt: now });
+      Object.assign(x, { points: d.points.slice(), symptoms: d.symptoms || '', feeling: d.feeling || '', date: d.date || x.date, bed: d.bed, updatedAt: now });
+      if (x.status === 'done') Object.assign(x, { startAt: null, endAt: null, manip: [] });
     });
     if (!ok) return false;
     S.dirty = false;
@@ -584,24 +616,6 @@ window.AcuUIFactory = function (api) {
   // ============================================================
   // 行针、拔针
   // ============================================================
-  async function recordManip(id) {
-    const a = getAcu(id);
-    if (!Acu.isActive(a)) return;
-    const now = new Date().toISOString();
-    let count;
-    const ok = await commit((db) => {
-      const x = db.acu.find((q) => q.id === id);
-      x.manip = (x.manip || []).concat(now);
-      count = x.manip.length;
-      x.updatedAt = now;
-    });
-    if (ok) {
-      await reconcile();
-      toast(`已记录：${nameOf(a)} 第 ${count} 次行针`);
-    }
-    refresh();
-  }
-
   // 拔针：列出所有穴位，一个一个点过才能确认
   async function removeFlow(id) {
     const a = getAcu(id);
@@ -647,7 +661,7 @@ window.AcuUIFactory = function (api) {
     const now = new Date().toISOString();
     const ok = await commit((db) => {
       const x = db.acu.find((q) => q.id === id);
-      Object.assign(x, { status: 'done', endAt: now, feeling: feel.trim(), updatedAt: now });
+      Object.assign(x, { status: 'done', date: x.date || Acu.todayStr(new Date(x.startAt || now)), startAt: null, endAt: null, manip: [], feeling: feel.trim(), updatedAt: now });
     });
     if (!ok) return;
     await reconcile();
@@ -668,16 +682,13 @@ window.AcuUIFactory = function (api) {
       body: `<div class="kv"><b>开始</b><span>${hhmm(a.startAt)}（已留 ${mins(st.elapsed)} 分）</span></div>
         <div class="kv"><b>拔针</b><span>${hhmm(new Date(st.removeAt).toISOString())}${st.due ? ' <b class="red">已到时间</b>' : ''}</span></div>
         <div class="kv"><b>穴位</b><span>${esc(ptsLine(a.points)) || '—'}</span></div>
-        ${a.symptoms ? `<div class="kv"><b>症状</b><span>${esc(a.symptoms)}</span></div>` : ''}
-        <div class="kv"><b>行针</b><span>${(a.manip || []).length ? a.manip.map((t) => hhmm(t)).join('、') : '还没有'}</span></div>`,
+        ${a.symptoms ? `<div class="kv"><b>症状</b><span>${esc(a.symptoms)}</span></div>` : ''}`,
       buttons: [
         { text: '修改', value: 'edit' },
-        { text: '记录行针', value: 'manip' },
         { text: '拔针', value: 'remove', primary: true },
       ],
     });
     if (v === 'edit') go('/acu/e/' + encodeURIComponent(id));
-    else if (v === 'manip') recordManip(id);
     else if (v === 'remove') removeFlow(id);
   }
 
@@ -976,7 +987,16 @@ window.AcuUIFactory = function (api) {
       if (e && e.target.closest('.mini')) return;
       bedSheet(el.dataset.id);
     },
-    'acu-manip': (el) => recordManip(el.dataset.id),
+    'acu-copy': async () => {
+      const text = (S.acuDraft?.points || []).map(Acu.canonPoint).join('、');
+      if (!text) return toast('还没有穴位可复制', 'warn');
+      try {
+        await navigator.clipboard.writeText(text);
+        toast('穴位已复制');
+      } catch (e) {
+        await sheet({ title: '长按复制穴位', body: `<textarea aria-label="穴位" readonly rows="3">${esc(text)}</textarea>`, buttons: [{ text: '关闭', value: null }] });
+      }
+    },
     'acu-remove': (el) => removeFlow(el.dataset.id),
     'acu-open': (el) => go('/acu/e/' + encodeURIComponent(el.dataset.id)),
     'acu-all': () => go('/acu/all'),
@@ -1047,6 +1067,10 @@ window.AcuUIFactory = function (api) {
       S.dirty = false;
       await reconcile();
       back('/acu');
+    },
+    'acu-bed-count': async () => {
+      const v = await sheet({ title: `床位 · ${cfg().beds} 张`, buttons: [{ text: '减少一张', value: -1 }, { text: '增加一张', value: 1, primary: true }] });
+      if (v) await changeSetting('beds', v);
     },
     'acu-beds': (el) => changeSetting('beds', Number(el.dataset.d)),
     'acu-dur': (el) => changeSetting('duration', Number(el.dataset.d)),
