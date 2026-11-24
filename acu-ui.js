@@ -82,16 +82,16 @@ window.AcuUIFactory = function (api) {
   function alarmText(a, al) {
     const who = `${a.bed}号床 ${nameOf(a)}`;
     if (al.kind === 'manip') return { title: `行针：${who}`, body: `第 ${al.n} 次行针（已留针 ${al.n * Acu.statusOf(a, cfg()).interval} 分钟）` };
-    if (al.n === 0) return { title: `准备拔针：${who}`, body: '距计划拔针还有 1 分 30 秒，可以开始最后一次行针。' };
+    if (al.n === 0) return { title: `准备拔针：${who}`, body: `距计划拔针还有 1 分 30 秒。${a.manipCancelled ? '' : '可以开始最后一次行针。'}` };
     return { title: `还没拔针：${who}`, body: `已超时 ${al.n * 5} 分钟，请尽快拔针` };
   }
 
   // 应该响的闹钟（所有正在留针的人、还没到点的）
-  const manipCompleted = (a, al) => al.kind === 'manip' && al.n <= (a.manip || []).length;
+  const skipManip = (a, al) => al.kind === 'manip' && (a.manipCancelled || al.n <= (a.manip || []).length);
   function wanted(now = Date.now()) {
     const out = [];
     for (const a of activeList()) for (const al of Acu.alarmsOf(a, cfg())) {
-      if (al.at > now && !manipCompleted(a, al)) out.push({ a, al, id: Acu.notifId(a.id, al.idx) });
+      if (al.at > now && !skipManip(a, al)) out.push({ a, al, id: Acu.notifId(a.id, al.idx) });
     }
     return out;
   }
@@ -143,17 +143,19 @@ window.AcuUIFactory = function (api) {
       const add = [];
       for (const { a, al, id } of list) {
         const current = pending.get(id);
-        if (current?.extra?.alarmClock === exact && Math.abs(new Date(current.schedule?.at).getTime() - al.at) < 1000) continue;
-        if (al.at <= Date.now() || manipCompleted(a, al)) continue;
+        const noFinalManip = al.kind === 'remove' && al.n === 0 && !!a.manipCancelled;
+        if (current?.extra?.alarmClock === exact && !!current.extra.noFinalManip === noFinalManip && Math.abs(new Date(current.schedule?.at).getTime() - al.at) < 1000) continue;
+        if (al.at <= Date.now() || skipManip(a, al)) continue;
         add.push({
           id, ...alarmText(a, al), channelId: channelId(al.kind), sound: `${al.kind}.wav`,
           schedule: { at: new Date(al.at), allowWhileIdle: true }, isExactNotification: exact,
-          smallIcon: 'ic_stat_acu', autoCancel: true, extra: { acu: a.id, kind: al.kind, alarmClock: exact },
+          smallIcon: 'ic_stat_acu', autoCancel: true, extra: { acu: a.id, kind: al.kind, alarmClock: exact, noFinalManip },
         });
       }
       if (add.length) await Native.LN.schedule({ notifications: add });
     } catch (e) {
       console.warn('闹钟设置失败', e);
+      return false;
     }
   }
 
@@ -175,7 +177,7 @@ window.AcuUIFactory = function (api) {
         setTimeout(() => {
           webTimers.delete(x.id);
           const a = getAcu(x.a.id);
-          if (!Acu.isActive(a) || manipCompleted(a, x.al)) return;
+          if (!Acu.isActive(a) || skipManip(a, x.al)) return;
           const t = alarmText(a, x.al);
           webBeep(x.al.kind);
           try {
@@ -209,21 +211,43 @@ window.AcuUIFactory = function (api) {
   // ============================================================
   // 床位页
   // ============================================================
+  function countdownText(at, now = Date.now()) {
+    const left = Math.ceil((at - now) / 1000);
+    if (left <= 0) return '该拔针了';
+    return `剩 ${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`;
+  }
+  const countdownHtml = (at) => `<span class="acu-countdown" role="timer" data-remove-at="${at}">${countdownText(at)}</span>`;
+  function tickCountdowns() {
+    const now = Date.now();
+    for (const el of $$('[data-remove-at]')) {
+      const at = Number(el.dataset.removeAt);
+      const label = countdownText(at, now);
+      if (el.textContent !== label) el.textContent = label;
+      el.closest('.bed')?.classList.toggle('due', now >= at);
+    }
+  }
+  setInterval(() => {
+    if (document.visibilityState === 'visible') tickCountdowns();
+  }, 1000);
+
   function bedCardHtml(n) {
     const a = onBed(n);
     if (!a) return `<button class="bed empty" data-act="acu-start" data-bed="${n}"><span class="bn">${n}号床</span><span class="plus">＋</span><span class="em">空床，点这里扎针</span></button>`;
     const st = Acu.statusOf(a, cfg());
     const due = st.due;
-    const manipLine = st.nextManip ? `<span class="nx">行针 ${hhmm(new Date(st.nextManip.at).toISOString())}（第${st.nextManip.n}次）</span>` : '';
+    const manipLine = a.manipCancelled ? '<span class="nx">已取消行针</span>' : st.nextManip ? `<span class="nx">行针 ${hhmm(new Date(st.nextManip.at).toISOString())}（第${st.nextManip.n}次）</span>` : '';
     const removeTime = `拔针 ${hhmm(new Date(st.removeAt).toISOString())}`;
-    const removeLine = due ? `<b class="red">该拔针了</b> ${removeTime}${-st.left >= 1 ? `（超 ${mins(-st.left)} 分）` : ''}` : removeTime;
+    const overdue = -st.left >= 1 ? `（超 ${mins(-st.left)} 分）` : '';
     return `<div class="bed on${due ? ' due' : ''}" data-act="acu-bed" data-id="${esc(a.id)}">
       <span class="bn">${n}号床</span>
       <span class="who">${esc(nameOf(a))}</span>
       <span class="tm"><b>${mins(st.elapsed)}</b> / ${st.duration} 分</span>
       <span class="pg"><i style="width:${Math.round(st.progress * 100)}%"></i></span>
-      ${manipLine}<span class="nx">${removeLine}</span>
-      <span class="acts"><button type="button" class="mini red" data-act="acu-remove" data-id="${esc(a.id)}">拔针</button></span>
+      ${manipLine}<span class="nx">${removeTime} ${countdownHtml(st.removeAt)}${overdue}</span>
+      <span class="acts">
+        <button type="button" class="mini" data-act="acu-toggle-manip" data-id="${esc(a.id)}">${a.manipCancelled ? '恢复行针' : '取消行针'}</button>
+        <button type="button" class="mini red" data-act="acu-remove" data-id="${esc(a.id)}">拔针</button>
+      </span>
     </div>`;
   }
   function bedsHtml() {
@@ -241,7 +265,7 @@ window.AcuUIFactory = function (api) {
   }
   function rowHtml(a) {
     return `<button class="vrow" data-act="acu-open" data-id="${esc(a.id)}">
-      <div class="h"><b>${esc(nameOf(a))}</b><span style="color:var(--muted)">${esc(a.date || '日期不详')}${a.bed ? ` · ${a.bed}号床` : ''}</span>${Acu.isActive(a) ? '<span class="tag">留针中</span>' : ''}</div>
+      <div class="h"><b>${esc(nameOf(a))}</b><span style="color:var(--muted)">${esc(a.date || '日期不详')}${Acu.isActive(a) && a.bed ? ` · ${a.bed}号床` : ''}</span>${Acu.isActive(a) ? '<span class="tag">留针中</span>' : ''}</div>
       ${a.symptoms ? `<div class="c">${esc(a.symptoms)}</div>` : ''}
       <div class="r">${esc(ptsLine(a.points)) || '（未写穴位）'}</div>
       ${a.feeling ? `<div class="r" style="color:var(--green)">针后：${esc(a.feeling)}</div>` : ''}
@@ -288,6 +312,7 @@ window.AcuUIFactory = function (api) {
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState !== 'visible') return;
     refresh();
+    tickCountdowns();
     if (nativeReconcile) {
       reconcile();
       fillPerm();
@@ -299,7 +324,7 @@ window.AcuUIFactory = function (api) {
   // ============================================================
   function ptsEditorHtml(points) {
     useCustom();
-    return `<div class="pts" id="pts">${(points || []).map((p, i) => `<span class="pt-chip" data-i="${i}"><button type="button" class="pt${Acu.isKnownPoint(p) ? '' : ' unk'}" data-i="${i}">${esc(p)}</button><button type="button" class="pt-grip" aria-label="移动${esc(p)}" aria-keyshortcuts="Alt+ArrowLeft Alt+ArrowRight" ${points.length < 2 ? 'hidden' : ''}>⠿</button></span>`).join('')}<input id="ptIn" type="text" placeholder="${(points || []).length ? '继续加穴位…' : '穴位：名称或拼音首字母（zsl＝足三里）'}" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="done" /></div>
+    return `<div class="pts" id="pts">${(points || []).map((p, i) => `<button type="button" class="pt${Acu.isKnownPoint(p) ? '' : ' unk'}" data-i="${i}">${esc(p)}</button>`).join('')}<input id="ptIn" type="text" placeholder="${(points || []).length ? '继续加穴位…' : '穴位：名称或拼音首字母（zsl＝足三里）'}" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" enterkeyhint="done" /></div>
       <div class="sugg" id="ptSug"></div>`;
   }
   let usageCache = null;
@@ -307,10 +332,137 @@ window.AcuUIFactory = function (api) {
     if (!usageCache || usageCache.rev !== S.rev) usageCache = { rev: S.rev, m: Acu.pointUsage(S.db.acu) };
     return usageCache.m;
   }
+
+  function bindPointOrder(box, inp, d, onChange) {
+    const toggle = $('#ptSort');
+    const hint = $('#ptSortHint');
+    let selected = null;
+    let target = null;
+    let drag = null;
+    const select = (chip) => {
+      selected?.classList.remove('pt-selected');
+      if (selected) selected.setAttribute('aria-pressed', 'false');
+      selected = chip;
+      if (chip) {
+        chip.classList.add('pt-selected');
+        chip.setAttribute('aria-pressed', 'true');
+      }
+    };
+    const highlight = (chip) => {
+      target?.classList.remove('pt-drop');
+      target = chip;
+      target?.classList.add('pt-drop');
+    };
+    const move = (chip, dest) => {
+      select(null);
+      if (chip === dest || !dest) return;
+      const from = Number(chip.dataset.i);
+      const to = Number(dest.dataset.i);
+      const [point] = d.points.splice(from, 1);
+      d.points.splice(to, 0, point);
+      const reference = from < to ? dest.nextElementSibling : dest;
+      if (box.moveBefore) box.moveBefore(chip, reference);
+      else box.insertBefore(chip, reference);
+      $$('.pt', box).forEach((el, i) => (el.dataset.i = i));
+      chip.focus({ preventScroll: true });
+      onChange();
+      toast(`${point}移到第 ${to + 1} 位`);
+    };
+    const pick = (chip) => {
+      if (selected === chip) select(null);
+      else if (selected) move(selected, chip);
+      else select(chip);
+    };
+    const clearDrag = () => {
+      if (!drag) return;
+      const id = drag.id;
+      drag = null;
+      highlight(null);
+      if (box.hasPointerCapture(id)) box.releasePointerCapture(id);
+    };
+    const mode = (sorting) => {
+      clearDrag();
+      select(null);
+      d._sorting = sorting;
+      box.classList.toggle('sorting', sorting);
+      toggle.hidden = d.points.length < 2;
+      toggle.textContent = sorting ? '完成排序' : '调整顺序';
+      hint.hidden = !sorting;
+      inp.hidden = sorting;
+      $('#ptSug').hidden = sorting;
+      for (const chip of $$('.pt', box)) {
+        if (sorting) chip.setAttribute('aria-pressed', 'false');
+        else chip.removeAttribute('aria-pressed');
+      }
+    };
+    mode(!!d._sorting && d.points.length > 1);
+    toggle.onclick = () => mode(!d._sorting);
+    box.addEventListener('pointerdown', (e) => {
+      const chip = e.target.closest('.pt');
+      if (!d._sorting || !chip || e.button !== 0 || drag) return;
+      drag = {
+        id: e.pointerId, x: e.clientX, y: e.clientY, chip, moved: false,
+        slots: $$('.pt', box).map((el) => ({ el, rect: el.getBoundingClientRect() })),
+      };
+    });
+    const destination = (x, y) => {
+      const bounds = box.getBoundingClientRect();
+      if (x < bounds.left || x > bounds.right || y < bounds.top || y > bounds.bottom) return null;
+      let closest = null;
+      let distance = Infinity;
+      for (const { el, rect } of drag.slots) {
+        const dx = Math.max(rect.left - x, x - rect.right, 0);
+        const dy = Math.max(rect.top - y, y - rect.bottom, 0);
+        const candidate = dx * dx + dy * dy;
+        if (candidate < distance) {
+          closest = el;
+          distance = candidate;
+        }
+      }
+      return closest;
+    };
+    box.addEventListener('pointermove', (e) => {
+      if (drag?.id !== e.pointerId) return;
+      if (!drag.moved) {
+        if (Math.hypot(e.clientX - drag.x, e.clientY - drag.y) < 8) return;
+        drag.moved = true;
+        box.setPointerCapture(e.pointerId);
+        select(drag.chip);
+      }
+      const dest = destination(e.clientX, e.clientY);
+      highlight(dest === drag.chip ? null : dest);
+    });
+    box.addEventListener('pointerup', (e) => {
+      if (drag?.id !== e.pointerId) return;
+      const { chip, moved } = drag;
+      const dest = moved ? destination(e.clientX, e.clientY) : null;
+      clearDrag();
+      if (moved) move(chip, dest);
+      else pick(chip);
+    });
+    const abort = (e) => {
+      if (drag?.id !== e.pointerId || (e.type === 'lostpointercapture' && e.target !== box)) return;
+      clearDrag();
+      select(null);
+    };
+    box.addEventListener('pointercancel', abort);
+    box.addEventListener('lostpointercapture', abort);
+    box.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && d._sorting) {
+        clearDrag();
+        select(null);
+      }
+    });
+    return (chip, e) => {
+      if (!d._sorting) return false;
+      if (chip && e.detail === 0) pick(chip);
+      return true;
+    };
+  }
+
   function bindPts(d, onChange) {
     const box = $('#pts');
     const inp = $('#ptIn');
-    const sug = $('#ptSug');
     const redraw = () => {
       const keep = document.activeElement === inp;
       const v = inp.value;
@@ -319,52 +471,7 @@ window.AcuUIFactory = function (api) {
       bindPts(d, onChange);
       if (keep) $('#ptIn').focus();
     };
-    const move = (from, to, focus = false) => {
-      if (from === to || to < 0 || to >= d.points.length) return;
-      const [point] = d.points.splice(from, 1);
-      d.points.splice(to, 0, point);
-      onChange();
-      redraw();
-      if (focus) $(`#pts .pt-chip[data-i="${to}"] .pt-grip`).focus();
-      toast(`${point}移到第 ${to + 1} 位`);
-    };
-    let drag;
-    const clearDrag = () => {
-      drag = null;
-      box.querySelector('.pt-drop')?.classList.remove('pt-drop');
-    };
-    box.addEventListener('pointerdown', (e) => {
-      const grip = e.target.closest('.pt-grip');
-      if (!grip || e.button !== 0 || drag) return;
-      drag = { pointer: e.pointerId, from: Number(grip.parentElement.dataset.i), to: null, grip };
-      grip.setPointerCapture(e.pointerId);
-    });
-    box.addEventListener('pointermove', (e) => {
-      if (drag?.pointer !== e.pointerId) return;
-      const chip = document.elementFromPoint(e.clientX, e.clientY)?.closest('.pt-chip');
-      box.querySelector('.pt-drop')?.classList.remove('pt-drop');
-      drag.to = chip && box.contains(chip) ? Number(chip.dataset.i) : null;
-      if (drag.to != null && drag.to !== drag.from) chip.classList.add('pt-drop');
-    });
-    box.addEventListener('pointerup', (e) => {
-      if (drag?.pointer !== e.pointerId) return;
-      const { from, to } = drag;
-      clearDrag();
-      if (to != null) move(from, to);
-    });
-    box.addEventListener('lostpointercapture', (e) => { if (drag?.pointer === e.pointerId) clearDrag(); });
-    box.addEventListener('keydown', (e) => {
-      const grip = e.target.closest('.pt-grip');
-      if (!grip) return;
-      if (e.key === 'Escape' && drag) {
-        drag.grip.releasePointerCapture(drag.pointer);
-        clearDrag();
-      }
-      if (!e.altKey || !['ArrowLeft', 'ArrowRight'].includes(e.key)) return;
-      e.preventDefault();
-      const i = Number(grip.parentElement.dataset.i);
-      move(i, i + (e.key === 'ArrowLeft' ? -1 : 1), true);
-    });
+    const sortClick = bindPointOrder(box, inp, d, onChange);
     const add = (txt) => {
       for (const p of Acu.expandGroups(Acu.splitPoints(txt), groups())) Acu.addPoint(d.points, Acu.canonPoint(p));
       inp.value = '';
@@ -411,8 +518,8 @@ window.AcuUIFactory = function (api) {
       $('#ptIn').focus();
     };
     box.onclick = async (e) => {
-      if (e.target.closest('.pt-grip')) return;
       const b = e.target.closest('.pt');
+      if (sortClick(b, e)) return;
       if (!b) return $('#ptIn').focus();
       const i = Number(b.dataset.i);
       const p = d.points[i];
@@ -489,19 +596,20 @@ window.AcuUIFactory = function (api) {
 
   function formHtml(d) {
     const isNew = !d.id;
+    const active = Acu.isActive(d);
     const c = cfg();
     const last = d.patientId ? acuOf(d.patientId).find((a) => a.id !== d.id && (a.points || []).length) : null;
     return `<form id="aform" autocomplete="off" onsubmit="return false">
-      <div class="card"><h3>患者${d.bed ? `<span class="bedtag">${d.bed}号床</span>` : ''}</h3><div id="pickBox">${patientPickHtml(d)}</div></div>
-      <div class="card"><h3 class="hflex">穴位 <small id="ncount">${d.points.length ? `${d.points.length} 穴` : ''}</small></h3><div class="chips acu-point-tools"><button type="button" class="lbtn" data-act="acu-copy">复制穴位</button>${last ? `<button type="button" class="lbtn" data-act="acu-last">用上次的（${esc(last.date)}）</button>` : ''}</div>${ptsEditorHtml(d.points)}</div>
+      <div class="card"><h3>患者${(isNew || active) && d.bed ? `<span class="bedtag">${d.bed}号床</span>` : ''}</h3><div id="pickBox">${patientPickHtml(d)}</div></div>
+      <div class="card"><h3 class="hflex">穴位 <small id="ncount">${d.points.length ? `${d.points.length} 穴` : ''}</small></h3><div class="chips acu-point-tools"><button type="button" class="lbtn" data-act="acu-copy">复制穴位</button><button type="button" class="lbtn" id="ptSort" hidden>调整顺序</button>${last ? `<button type="button" class="lbtn" data-act="acu-last">用上次的（${esc(last.date)}）</button>` : ''}</div><p class="hint pt-sort-hint" id="ptSortHint" hidden>拖动穴位，或依次点选穴位和目标位置。</p>${ptsEditorHtml(d.points)}</div>
       <div class="card"><h3>症状 <small>选填</small></h3><textarea id="aSym" rows="2" placeholder="这次哪里不舒服">${esc(d.symptoms || '')}</textarea></div>
       ${
         isNew
           ? `<p class="hint" style="margin:0 4px 90px">留针 ${c.duration} 分钟，拔针前 1 分 30 秒响铃。${c.interval ? `留针期间每 ${c.interval} 分钟提醒行针。` : ''}</p>`
           : `<div class="card"><h3>针后感觉 <small>选填</small></h3><textarea id="aFeel" rows="2">${esc(d.feeling || '')}</textarea></div>
         <div class="card"><h3>时间</h3>
-          <div class="two"><label class="field"><span>日期</span><input type="date" id="aDate" value="${esc(d.date || '')}" /></label>
-          <label class="field"><span>床位</span><input type="number" id="aBed" inputmode="numeric" min="1" max="12" value="${esc(d.bed || '')}" /></label></div>
+          <div class="${active ? 'two' : ''}"><label class="field"><span>日期</span><input type="date" id="aDate" value="${esc(d.date || '')}" /></label>
+          ${active ? `<label class="field"><span>床位</span><input type="number" id="aBed" inputmode="numeric" min="1" max="12" value="${esc(d.bed || '')}" /></label>` : ''}</div>
         </div><div style="height:80px"></div>`
       }
     </form>`;
@@ -595,8 +703,11 @@ window.AcuUIFactory = function (api) {
     const ok = await commit((db) => {
       const x = db.acu.find((q) => q.id === d.id);
       if (!x) throw new Error('这条记录已被删除');
-      Object.assign(x, { points: d.points.slice(), symptoms: d.symptoms || '', feeling: d.feeling || '', date: d.date || x.date, bed: d.bed, updatedAt: now });
-      if (x.status === 'done') Object.assign(x, { startAt: null, endAt: null, manip: [] });
+      Object.assign(x, { points: d.points.slice(), symptoms: d.symptoms || '', feeling: d.feeling || '', date: d.date || x.date, bed: Acu.isActive(x) ? d.bed : null, updatedAt: now });
+      if (x.status === 'done') {
+        Object.assign(x, { startAt: null, endAt: null, manip: [] });
+        delete x.manipCancelled;
+      }
     });
     if (!ok) return false;
     S.dirty = false;
@@ -616,6 +727,27 @@ window.AcuUIFactory = function (api) {
   // ============================================================
   // 行针、拔针
   // ============================================================
+  const changingManip = new Set();
+  async function toggleManip(id) {
+    const a = getAcu(id);
+    if (!Acu.isActive(a) || changingManip.has(id)) return;
+    const cancelled = !a.manipCancelled;
+    changingManip.add(id);
+    try {
+      const ok = await commit(() => {
+        a.manipCancelled = cancelled;
+        a.updatedAt = new Date().toISOString();
+      });
+      if (!ok) return;
+      refresh();
+      const updated = await reconcile();
+      if (updated === false) toast('闹钟未更新，请检查闹钟权限后重试', 'warn');
+      else toast(cancelled ? '已取消行针，拔针照常提醒' : '已恢复后续行针提醒');
+    } finally {
+      changingManip.delete(id);
+    }
+  }
+
   // 拔针：列出所有穴位，一个一个点过才能确认
   async function removeFlow(id) {
     const a = getAcu(id);
@@ -661,7 +793,9 @@ window.AcuUIFactory = function (api) {
     const now = new Date().toISOString();
     const ok = await commit((db) => {
       const x = db.acu.find((q) => q.id === id);
-      Object.assign(x, { status: 'done', date: x.date || Acu.todayStr(new Date(x.startAt || now)), startAt: null, endAt: null, manip: [], feeling: feel.trim(), updatedAt: now });
+      if (!Acu.isActive(x)) throw new Error('这条记录已结束留针');
+      Object.assign(x, { status: 'done', date: x.date || Acu.todayStr(new Date(x.startAt || now)), bed: null, startAt: null, endAt: null, manip: [], feeling: feel.trim(), updatedAt: now });
+      delete x.manipCancelled;
     });
     if (!ok) return;
     await reconcile();
@@ -675,12 +809,12 @@ window.AcuUIFactory = function (api) {
 
   async function bedSheet(id) {
     const a = getAcu(id);
-    if (!a) return;
+    if (!Acu.isActive(a)) return;
     const st = Acu.statusOf(a, cfg());
     const v = await sheet({
       title: `${a.bed}号床 · ${nameOf(a)}`,
       body: `<div class="kv"><b>开始</b><span>${hhmm(a.startAt)}（已留 ${mins(st.elapsed)} 分）</span></div>
-        <div class="kv"><b>拔针</b><span>${hhmm(new Date(st.removeAt).toISOString())}${st.due ? ' <b class="red">已到时间</b>' : ''}</span></div>
+        <div class="kv"><b>拔针</b><span>${hhmm(new Date(st.removeAt).toISOString())} ${countdownHtml(st.removeAt)}</span></div>
         <div class="kv"><b>穴位</b><span>${esc(ptsLine(a.points)) || '—'}</span></div>
         ${a.symptoms ? `<div class="kv"><b>症状</b><span>${esc(a.symptoms)}</span></div>` : ''}`,
       buttons: [
@@ -997,6 +1131,7 @@ window.AcuUIFactory = function (api) {
         await sheet({ title: '长按复制穴位', body: `<textarea aria-label="穴位" readonly rows="3">${esc(text)}</textarea>`, buttons: [{ text: '关闭', value: null }] });
       }
     },
+    'acu-toggle-manip': (el) => toggleManip(el.dataset.id),
     'acu-remove': (el) => removeFlow(el.dataset.id),
     'acu-open': (el) => go('/acu/e/' + encodeURIComponent(el.dataset.id)),
     'acu-all': () => go('/acu/all'),

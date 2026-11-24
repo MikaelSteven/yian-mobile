@@ -291,7 +291,7 @@
     const iv = intOf(a, cfg);
     const out = [];
     // 保留旧通知编号，较密的间隔用独立编号，避免覆盖拔针提醒。
-    if (iv > 0) for (let k = 1; k * iv < dur - 1.5; k++) out.push({ idx: k < 50 ? k : k + 14, kind: 'manip', n: k, at: t0 + k * iv * 60000 });
+    if (!a.manipCancelled && iv > 0) for (let k = 1; k * iv < dur - 1.5; k++) out.push({ idx: k < 50 ? k : k + 14, kind: 'manip', n: k, at: t0 + k * iv * 60000 });
     out.push({ idx: 50, kind: 'remove', n: 0, at: t0 + dur * 60000 - 90000 });
     out.push({ idx: 51, kind: 'remove', n: 1, at: t0 + (dur + 5) * 60000 });
     out.push({ idx: 52, kind: 'remove', n: 2, at: t0 + (dur + 10) * 60000 });
