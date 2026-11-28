@@ -1146,6 +1146,13 @@ body.has-tabs #fab {
 .pts .pt.unk {
   background: var(--orange);
 }
+.pts .pt.marked, .rmv .rp.marked:not(.ok) {
+  border: 2px solid var(--red-line);
+  background: var(--red-bg);
+  color: var(--red);
+}
+.acu-session-fields :is(select, input) { min-height: 48px; }
+.rp-attn { display: block; margin-top: 2px; font-size: 12px; }
 .acu-point-tools { margin-bottom: 8px; }
 .pt-sort-hint { margin: 0 0 8px; }
 .pts.sorting .pt {

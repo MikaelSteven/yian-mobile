@@ -4,7 +4,7 @@
 // ============================================================
 (function () {
   'use strict';
-  const VERSION = '0.6.9';
+  const VERSION = '0.6.10';
   const $ = (s, r = document) => r.querySelector(s);
   const $$ = (s, r = document) => [...r.querySelectorAll(s)];
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -301,6 +301,7 @@
     }
     if (seq !== renderSeq) return;
     const r = parseRoute();
+    if (S.view === 'acunew' && !(r.name === 'acu' && r.a === 'new')) S.acuDraft = null;
     S.dirty = false;
     if (!S.cfg) {
       S.view = 'setup';

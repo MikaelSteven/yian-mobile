@@ -284,7 +284,7 @@
 
   // 第一次拔针提醒提前 90 秒，超时提醒仍按计划拔针时间计算。
   function alarmsOf(a, cfg) {
-    if (!isActive(a) || !a.startAt) return [];
+    if (!isActive(a) || !a.startAt || a.removingAt) return [];
     const t0 = new Date(a.startAt).getTime();
     if (!Number.isFinite(t0)) return [];
     const dur = durOf(a, cfg);
@@ -315,7 +315,8 @@
     const t0 = new Date(a.startAt).getTime();
     const dur = durOf(a, cfg);
     const iv = intOf(a, cfg);
-    const elapsed = Math.max(0, (now - t0) / 60000);
+    const clock = Date.parse(a.removingAt) || now;
+    const elapsed = Math.max(0, (clock - t0) / 60000);
     const removeAt = t0 + dur * 60000;
     const al = alarmsOf(a, cfg).filter((x) => x.kind === 'manip');
     const manipDone = (a.manip || []).length;
@@ -323,9 +324,9 @@
     const lastDue = [...al].reverse().find((x) => x.at <= now) || null;
     return {
       elapsed,
-      left: (removeAt - now) / 60000,
+      left: (removeAt - clock) / 60000,
       removeAt,
-      due: now >= removeAt,
+      due: clock >= removeAt,
       nextManip: next,
       lastDue, // 最近一次已经到点的行针（第几次）
       plannedManip: al.length,
